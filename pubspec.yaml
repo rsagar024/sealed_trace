@@ -1,0 +1,65 @@
+name: sealed_trace
+description: "Production-grade logging SDK for Flutter and Dart. Masks PII, seals logs with hybrid encryption, stores them offline and uploads reliably."
+version: 1.0.0
+homepage: https://github.com/rsagar024/sealed_trace
+repository: https://github.com/rsagar024/sealed_trace
+issue_tracker: https://github.com/rsagar024/sealed_trace/issues
+topics:
+  - logging
+  - encryption
+  - privacy
+  - observability
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
+
+# The test-only RSA key is public on purpose: it never protects real data and
+# server implementers need it to check the vectors (IMPLEMENTATION.md A67).
+false_secrets:
+  - /test/helpers/test_keys.dart
+  - /test/vectors/envelope_vectors.json
+
+platforms:
+  android:
+  ios:
+  linux:
+  macos:
+  web:
+  windows:
+
+dependencies:
+  flutter:
+    sdk: flutter
+  drift: ^2.35.3
+  sqlite3: ^3.8.0
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  dio: ^5.11.1
+  connectivity_plus: ^7.3.2
+  uuid: ^4.6.0
+  meta: ^1.19.0
+  package_info_plus: ^10.2.2
+  web: ">=0.5.1 <2.0.0"
+  crypto: ^3.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  fake_async: ^1.3.3
+  drift_dev: ^2.35.2
+  build_runner: ^2.17.1
+
+# Used when this package is the root, i.e. for its own tests. Apps that depend
+# on sealed_trace choose their own source in their pubspec.
+#
+# `source: system` uses the operating system's SQLite instead of downloading
+# the bundled binary, so tests do not depend on a network download.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name:
+        windows: winsqlite3
+        default: sqlite3

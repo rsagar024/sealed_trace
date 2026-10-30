@@ -1,0 +1,44 @@
+{
+ "description": [
+  "RSA-OAEP ciphertexts produced by Node (SHA-256 label hash, MGF1-SHA-256, empty label) for the test-only key",
+  "in envelope_vectors.json. The Dart test decoder must recover messageBase64 from each ciphertextBase64.",
+  "OAEP is randomized, so these ciphertexts change every time this script runs."
+ ],
+ "oaepCases": [
+  {
+   "name": "node-encrypted-0-bytes",
+   "messageBase64": "",
+   "ciphertextBase64": "g1XrG8U3KtY4l3lbfmVYIUe4vcG9ccIYEBprNqnuRhfz/DndJ4XBgQHLvAaLjEMMWK9+dUBDT/C5gE+M3nyvvNcihQoMKAFq2/6b29wr5wibx4Yl0qvv+jSoHnQQmCSi36AXgM4vEcVFo1ryxbSxTRIETg/G+lyY79301piNQThXs+ITpowl9gc/ungo1awF8iAeY95ETopQWkGXlXPc9f4gKfWNiGyTPEPXstaWNjM1+VIbZUOAPVWW5b/cKicFTA+w2azWw5WAu3ufY5lU2PSmEaQaTy7cV/3EDvFFPDrV17RIis+EEzqWnEX0xRNDWOz6/2Hqze24TMbpwN5RPg=="
+  },
+  {
+   "name": "node-encrypted-1-bytes",
+   "messageBase64": "BQ==",
+   "ciphertextBase64": "JatqtNSgUTGLA4tRXtwVDonjzZ9K1LgpJOQa+sJDsu1c1qSTRtsn/ifsK5jRe03hZOZt6dsvw6+4G5XLj49f8venGM0V978DyXVKoSizBcD52NQdXLMwWJgQHi4zKIqFkV1PlmwT/tT1ghuMVUY/JqzVMLg4sUGPBkg3x2shO94lGyP5s3D9wILtiw3xZnCja1uM7mMi6VWdknuY/TladuAYdZRs/cEeFkUnrM7qGswHRfg9ksyYNI5K0REDWFRa7y9CRNdj8AuRXrNPbXpkfLWP5YMeROP5V4N/SdJrIFZu1s+ulrOQwhGrSzSX56UkfV2Frhoko5tUsQ4K3JvuSg=="
+  },
+  {
+   "name": "node-encrypted-16-bytes",
+   "messageBase64": "Oz5dPo+G4OXbz5VDs3wuww==",
+   "ciphertextBase64": "c9R+mFvAgKhP+aE9OhkL1hM6O1nv6o2X7MHqvFoXjk4DieCkfee6VU/tQCDKFf4EopUUAPG8OayZF+lqWDHMWVth09mNbnOyK/D3CnxHXbpyw5QtjISdfeB9p+jXqfxr0KwXUqJsaRNtpZwzfY9PUTwqcc1X69BfOf3mkniCzjfG6jsMrziuj3twjt2+uUx0E0lb7AxfJA19HogrYYa7Ay2aaN0CiM/YaAimcSPwF4ecFJgyuJLmZvs7xgOaYiDFU5689uyyq3cOq8sEnD4Q5S1ovyaU4y4UJdD092/UD+nUrVNfbNYvatMlwTkuH6APirK0WLNtL3RCnLDgfYFQhg=="
+  },
+  {
+   "name": "node-encrypted-32-bytes",
+   "messageBase64": "JPO5LwO3OxtSJ+yVsVCgSCiwqc4SfjOMmcR3WeSVYDs=",
+   "ciphertextBase64": "cdpgqc6OyOuYqYj/kQcp1C0PxfiLOllHZ4lqnxK0/OKkSwUpd8IUVGJlKRXa6xlHKOH0awCLXYYoMWTl7auQuPwfLLVM8zwyow3leTvveoQr5k8pbaASGA1Y/1M8MrcemQCPyELeABsFTsvGNSht4uUh0ZaW9ryGDVo1mbbjCTDcxEzAF6LC2uEznXgngzr7lSiUXskqFwICDKtVjcIKBfuufbvDUE5RKPlpP3DM0fjaQK0BEqYdLh6PUHLRsKXIob/GsSpOkBCpaLJpivmJrQbD31aec7/Njexl7G+PPDIbOd87hsJ8ReNzcBxqB+WAf4vR47zxSEGU7/BaLr+aog=="
+  },
+  {
+   "name": "node-encrypted-33-bytes",
+   "messageBase64": "a1z76kTLUblm7CTFsYdSOEbU00hIr7Eydl7lk0pxmgIU",
+   "ciphertextBase64": "n3DQziDRuHxBFWnr5scHZoKgUUHYXch7vTwo1t/DWERGRBUP/inIGq+nZDY+mc6O/wTdCn62I0V+UuKC4h1FsSL17EpJfrbRtgd6nRoeo6U7zAwZ8EEbakgOhKuhoT3ARFv9h4hbIQen6OI42hu8lt10RLEd9KFH/sTSEZihiPIeKv6e2KoDcKgvsn2di8hhAHM+bRSmalYQ0AT1m9HOxMN8JVvXVChYkxyO/DNbiiy6J8xn2AvvTHku8ffpFgCxme2ujE4m7lkdbFcFXjHKmXvnyaYX/LILOnap2e4e8NyzHmQBw1ZlVFBSlAjUtpZgqmr21IBG3ftd1N+F1qT2pA=="
+  },
+  {
+   "name": "node-encrypted-100-bytes",
+   "messageBase64": "cuaieBJTcnCUMlU0vzNQbWi580+LYqHHZwq6AD4E7FbjMhNXoUJZAZFgn9X7m+W07I+pcJpOkHurEBuxjL8i2wlpe35i06g1mRbDCJCkictIIYFL+hAHYpRqnVFgWynl9DtHQw==",
+   "ciphertextBase64": "l9Xv6oqAHcBPLiZwIVEoiNNJ79x1yv9tO4Nw/DkSloKMvpN7D2N2IRJ/C84FPDPxIAOFv33rvamXCmzd+yaL6WrIJJOsASggTmV/hlmNSTQshffed6WowgDbDmHu39FwXZjxHK329vPqYk+H4qx3pO/C6+ksc/5meKi7MpD2KrDFl0RLB7NZloxXbJvh5JjouEXm+Zr7wIJOkrUO/3Luz5h7vOsAZqJMzVItVzmwihqL02/DnI7fHiZE5RVcofLJlHx1Rtu46a6ktdVu3hm0vv3oE0rzeytnor75DwJAFySRyjyqnFlmUHXZun6NAqAZGYYV2E8LUk6AVairlhTz9Q=="
+  },
+  {
+   "name": "node-encrypted-190-bytes",
+   "messageBase64": "ROVJnMl0mCeVnQSydyO8gLWfvfaQLg4LAr0jjUpRHMwXCAntMYXLyrsAvv/U2gsrjvd1DjlnDC1YTbOqBHDAGC7wRZx9wUv9RoYtTak1dN6Ccc++lLfx8KQjujiM1YDIat8hiyXu6oW6mL9KexKeoqYSyfHyUyznkPdmFizEZ26vVP5JT/NidZJ7eHWn+UHBKztWueqiQ16cksL7Rfs9oqpX5TGQRSU04JQ+f/M6wIAzizn4J55wqftJ2yxmog==",
+   "ciphertextBase64": "foFuXFJeqK4mBpZwvivXd76r0A4Zy4gPOBtJAgpgwZsK+jzp1pr8CUIkvkoj+BSYFYlfYtLeBsdTB9Nu0GtPZ3qalohMBtTt6x4ysWaNf2J7n5j6jwvm7dPPgpaNE0i7fw1E8Yrss2GCQDP03z+U1jeZ0Jh8ywgaQpK2c7xYwJrwMdvhir/QCtkdqwuUOqVxMPKvZWr+AGAAVoutj0L/ztQK3oNbri+BTEDQW2FicXJul0Nvj8OTcajAVDENx2Gglhci8V2yJ4mudWeQwDlRW4NaK0SYerYo/7wWbPBL9LpjMGzhBCMJRhHn24kvP2DyHmw9V5Yx1ZE2eIP+Mq4igQ=="
+  }
+ ]
+}
