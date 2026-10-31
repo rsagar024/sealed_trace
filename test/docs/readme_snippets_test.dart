@@ -7,6 +7,7 @@ library;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show appFlavor;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sealed_trace/sealed_trace.dart';
 import 'package:sealed_trace/src/facade/runtime_overrides.dart';
@@ -30,6 +31,19 @@ Future<void> quickStart() async {
       appName: 'shop',
       env: SealedTraceEnv.prod,
       minLevel: LogLevel.info,
+    ),
+  );
+}
+
+Future<void> initForFlavor() async {
+  await SealedTrace.init(
+    SealedTraceConfig(
+      baseUrl: 'https://logs.example.com',
+      projectId: 'my-project',
+      apiKey: const String.fromEnvironment('SEALED_TRACE_API_KEY'),
+      publicKeyPem: projectPublicKeyPem,
+      appName: 'shop',
+      env: SealedTraceEnv(appFlavor ?? 'dev'),
     ),
   );
 }

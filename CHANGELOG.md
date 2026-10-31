@@ -8,6 +8,11 @@ First release.
   `log(LogEvent)`, `setUser`, `setContext`, `addMaskKeys`, `addMaskPattern`,
   `flush`, `clearLocalLogs`, `dispose`, `diagnostics`, and the `onException`
   and `onUploadResult` callbacks.
+- **Environments.** `SealedTraceEnv.dev`, `.staging`, `.prod`, or any
+  environment created on the SealedTrace dashboard, such as
+  `SealedTraceEnv('qa')` or `SealedTraceEnv(appFlavor ?? 'dev')` with Flutter
+  flavors. Names are 1 to 32 characters of `a-z`, `0-9`, `_` or `-`; any other
+  name leaves the SDK disabled. See "Environments & flavors" in the README.
 - **Never throws, zero cost when disabled.** Every public call is guarded.
   With `enabled: false`, or below `minLevel`, a call returns before anything
   is allocated.

@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show appFlavor;
 import 'package:sealed_trace/sealed_trace.dart';
 
 import 'src/demo_key.dart';
@@ -102,7 +103,8 @@ class _DemoScreenState extends State<DemoScreen> {
         apiKey: 'demo-api-key', // placeholder, not a real key
         publicKeyPem: demoPublicKeyPem,
         appName: 'sealed_trace_example',
-        env: SealedTraceEnv.dev,
+        // `flutter run --flavor stage` reports `stage`; no flavor means dev.
+        env: SealedTraceEnv(appFlavor ?? 'dev'),
         minLevel: _minLevel,
         enabled: _enabled,
         uploadConfig: UploadConfig(httpClientAdapter: _ingest),

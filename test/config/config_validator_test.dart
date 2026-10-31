@@ -25,6 +25,26 @@ void main() {
     expect(ConfigValidator.validate(c), isEmpty);
   });
 
+  test('accepts built-in and custom env names', () {
+    for (final name in ['dev', 'staging', 'prod', 'qa', 'stage-2', 'uat_eu']) {
+      expect(
+        ConfigValidator.validate(_valid.copyWith(env: SealedTraceEnv(name))),
+        isEmpty,
+        reason: name,
+      );
+    }
+  });
+
+  test('rejects bad env names', () {
+    for (final name in ['', 'Stage', '-dev', 'my env', 'a' * 33]) {
+      expect(
+        ConfigValidator.validate(_valid.copyWith(env: SealedTraceEnv(name))),
+        ['env must be 1-32 chars of a-z, 0-9, _ or -'],
+        reason: name,
+      );
+    }
+  });
+
   test('reports empty identifiers', () {
     final c = _valid.copyWith(projectId: ' ', apiKey: '', appName: '');
     expect(ConfigValidator.validate(c), hasLength(3));

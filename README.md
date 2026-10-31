@@ -90,6 +90,7 @@ Nothing else needs importing.
 
 - [Platform matrix](#platform-matrix) · [Requirements](#requirements) · [Quick start](#quick-start)
 - [Configuration](#configuration) · [API overview](#api-overview) · [Getting your keys](#getting-your-keys)
+- [Environments & flavors](#environments)
 - [Platform setup](#platform-setup) · [Security model](#security-model) · [Architecture](#architecture)
 - [Status](#status) · [Example app](#example-app) · [Migration notes](#migration-notes)
 - [Development](#development) · [Further reading](#further-reading) · [License](#license)
@@ -196,7 +197,7 @@ Two rules to know up front:
 | `apiKey` | required | Sent only as the `X-Api-Key` header. |
 | `publicKeyPem` | required | The project's RSA-2048 public key, SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
 | `appName` | required | Your app's name. |
-| `env` | `SealedTraceEnv.prod` | `dev`, `staging` or `prod`; reported in every event. |
+| `env` | `SealedTraceEnv.prod` | `SealedTraceEnv.dev`, `.staging`, `.prod`, or any environment created on the dashboard, such as `SealedTraceEnv('qa')`. 1–32 chars of `a-z`, `0-9`, `_`, `-`; any other name leaves the SDK disabled. Reported in every event as `ctx.env`. See [Environments & flavors](#environments). |
 | `minLevel` | `LogLevel.verbose` | Events below this level are dropped before anything is built. |
 | `enabled` | `true` | `false` makes every call a no-op: no queue, timer, storage or listener. |
 | `maskConfig` | `MaskConfig()` | [Masking](#maskconfig). |
@@ -363,14 +364,50 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | Config field | Where it comes from | Notes |
 |---|---|---|
 | `baseUrl` | your SealedTrace server | `https` in production (Android blocks cleartext by default). |
-| `projectId` | SealedTrace console, project settings | One per app or environment. |
-| `apiKey` | SealedTrace console, API keys | Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. |
+| `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
+| `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. |
 | `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. |
 
-- Use different keys for `dev`, `staging` and `prod`, and set `env` to match.
+- Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
   data.
 - The example app uses a demo-only public key whose private key was never saved.
+
+<a id="environments"></a>
+
+## 🌱 Environments & flavors
+
+A project on the dashboard has any number of environments (for example `dev` and `prod` at first, `stage` later).
+Each environment has its own API key; `projectId` and `publicKeyPem` are the same for all of them. The server files
+every batch under the environment of the key that sent it, and `ctx.env` is reported alongside.
+
+With [Flutter flavors](https://docs.flutter.dev/deployment/flavors), read the flavor name and pass the matching key in
+a define file per flavor:
+
+```dart
+import 'package:flutter/services.dart' show appFlavor;
+
+Future<void> initForFlavor() async {
+  await SealedTrace.init(
+    SealedTraceConfig(
+      baseUrl: 'https://logs.example.com',
+      projectId: 'my-project',
+      apiKey: const String.fromEnvironment('SEALED_TRACE_API_KEY'),
+      publicKeyPem: projectPublicKeyPem,
+      appName: 'shop',
+      env: SealedTraceEnv(appFlavor ?? 'dev'),
+    ),
+  );
+}
+```
+
+```sh
+# env/stage.json: {"SEALED_TRACE_API_KEY": "sk_…"}
+flutter run --flavor stage --dart-define-from-file=env/stage.json
+```
+
+Adding an environment later needs no SDK update: create it on the dashboard, copy its key into a new define file,
+and add the flavor. Flavor names must follow the `env` rules (lowercase, 1–32 chars of `a-z`, `0-9`, `_`, `-`).
 
 <a id="platform-setup"></a>
 

@@ -64,7 +64,7 @@ class EventPipeline {
     final masked = mask(record);
     final immediate =
         record.level == LogLevel.fatal ||
-        (record.level == LogLevel.error && env != SealedTraceEnv.prod);
+        (record.level == LogLevel.error && !env.isProd);
     queue.add(masked, immediate: immediate);
     counters.eventsAccepted++;
   }

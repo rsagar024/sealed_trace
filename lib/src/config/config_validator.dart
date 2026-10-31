@@ -20,8 +20,13 @@ abstract final class ConfigValidator {
     if (!_looksLikePem(config.publicKeyPem)) {
       problems.add('publicKeyPem must be a PEM-encoded public key');
     }
+    if (!_envName.hasMatch(config.env.name)) {
+      problems.add('env must be 1-32 chars of a-z, 0-9, _ or -');
+    }
     return problems;
   }
+
+  static final RegExp _envName = RegExp(r'^[a-z0-9][a-z0-9_-]{0,31}$');
 
   /// Returns [config] with out-of-range values clamped: `batchSize` to 1..50
   /// and `maxAttempts` to at least 1.

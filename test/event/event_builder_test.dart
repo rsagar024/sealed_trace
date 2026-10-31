@@ -148,6 +148,13 @@ void main() {
     expect(record.ctx['userName'], 'Asha');
   });
 
+  test('custom env names are reported as is', () {
+    final record = _builder(
+      env: const SealedTraceEnv('qa'),
+    ).build(level: LogLevel.info, tag: 't', message: 'm');
+    expect(record.ctx['env'], 'qa');
+  });
+
   test('network comes from the provider on every event', () {
     final record = _builder(
       network: _Wifi(),
