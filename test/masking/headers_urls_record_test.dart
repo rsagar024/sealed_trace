@@ -178,8 +178,13 @@ void main() {
       expect(out.ctx['feature'], 'beta');
     });
 
-    test('userName is always replaced', () {
-      expect(_engine().maskRecord(record()).ctx['userName'], '***');
+    test('userName is sent as given by default', () {
+      expect(_engine().maskRecord(record()).ctx['userName'], 'Asha Rao');
+    });
+
+    test('maskUserName replaces userName', () {
+      final engine = _engine(const MaskConfig(maskUserName: true));
+      expect(engine.maskRecord(record()).ctx['userName'], '***');
     });
 
     test('ids, tag, level, user id and core context are untouched', () {
@@ -227,8 +232,10 @@ void main() {
     });
 
     test('masking a record is idempotent and leaves no plaintext', () {
-      final once = _engine().maskRecord(record());
-      final twice = _engine().maskRecord(once);
+      // maskUserName so that 'Asha Rao' may not appear anywhere either.
+      const config = MaskConfig(maskUserName: true);
+      final once = _engine(config).maskRecord(record());
+      final twice = _engine(config).maskRecord(once);
       expect(jsonEncode(twice.toJson()), jsonEncode(once.toJson()));
       final text = jsonEncode(once.toJson());
       for (final secret in [

@@ -31,8 +31,6 @@ Future<void> _init([SealedTraceConfig config = _config]) async {
   await SealedTrace.init(config);
 }
 
-String _flushedJson() => jsonEncode([for (final r in sink.records) r.toJson()]);
-
 void main() {
   setUp(() async {
     await SealedTrace.dispose();
@@ -69,11 +67,21 @@ void main() {
     expect(record.metadata['password'], '***');
     expect((record.metadata['profile'] as Map)['email'], '***');
     expect((record.metadata['profile'] as Map)['city'], 'Pune');
-    expect(record.ctx['userName'], '***');
+    expect(record.ctx['userName'], 'Asha Rao');
+    expect(record.ctx['userDisplayName'], 'Asha Rao');
     expect(record.ctx['contact'], '***');
     expect(record.userId, 'user-42');
 
-    final text = _flushedJson();
+    // The readable name is allowed only in the two user name keys.
+    final text = jsonEncode(
+      record
+          .copyWith(
+            ctx: Map.of(record.ctx)
+              ..remove('userName')
+              ..remove('userDisplayName'),
+          )
+          .toJson(),
+    );
     for (final secret in [
       'asha@example.com',
       '4111111111111111',

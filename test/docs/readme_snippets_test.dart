@@ -57,6 +57,15 @@ void levels(Object e, StackTrace s) {
   SealedTrace.f('app', 'unrecoverable', error: e, stack: s);
 }
 
+/// Quick start step 4: required user and device context.
+void userAndDevice() {
+  SealedTrace.setUser('user-42', name: 'Asha Rao');
+  SealedTrace.setContext({
+    'deviceId': '<device id>',
+    'deviceModel': '<device model>',
+  });
+}
+
 Future<void> signInOut() async {
   SealedTrace.setUser('user-42');
   SealedTrace.setContext({'plan': 'pro', 'abVariant': 'B'});
@@ -111,7 +120,8 @@ Future<void> apiOverview(
 
   // Context: these do nothing before init has completed.
   SealedTrace.setUser('user-42', name: 'Asha');
-  SealedTrace.setContext({'plan': 'pro'});
+  const id = 'device-id', model = 'Pixel 8';
+  SealedTrace.setContext({'deviceId': id, 'deviceModel': model});
   SealedTrace.addMaskKeys(['iban']);
   SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));
 
@@ -151,6 +161,7 @@ void main() {
     SealedTrace.onException = (e, _) => errors.add(e);
     expect(SealedTrace.isInitialized, isTrue);
 
+    userAndDevice();
     levels(StateError('x'), StackTrace.current);
     await signInOut();
     ownMasking();

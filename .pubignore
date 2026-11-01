@@ -18,6 +18,7 @@ example/.flutter-plugins-dependencies
 # Internal documents: the original spec and the build guide.
 sealed_trace.txt
 IMPLEMENTATION.md
+SEALEDTRACE_PLATFORM_SPEC.md
 
 # IDE files
 .idea/

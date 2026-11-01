@@ -1,16 +1,41 @@
-// A tour of the sealed_trace SDK. It runs fully offline by default: uploads
-// go to a mock ingest server inside the app, and the Dio demo calls a mock
-// API. One optional button sends a real request to a public echo service.
+// A live example of the sealed_trace SDK.
+//
+// 1. Replace the placeholders below with your project's values from the
+//    SealedTrace console.
+// 2. Run with your environment's API key:
+//
+//      flutter run --dart-define=SEALED_TRACE_API_KEY=<your-api-key>
+//
+// With the placeholders left in, the SDK stays uninitialized, onException
+// reports the invalid public key, and nothing is sent.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
-import 'package:dio/dio.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show appFlavor;
 import 'package:sealed_trace/sealed_trace.dart';
 
-import 'src/demo_key.dart';
-import 'src/mock_servers.dart';
+// ---------------------------------------------------------------------------
+// Placeholders: replace with your project's values.
+// ---------------------------------------------------------------------------
+
+/// Your SealedTrace server.
+const baseUrl = 'https://YOUR-SEALEDTRACE-SERVER';
+
+/// Project id, from the console's project settings.
+const projectId = 'YOUR_PROJECT_ID';
+
+/// Project public key, shared by all environments of the project.
+const projectPublicKeyPem = '''
+-----BEGIN PUBLIC KEY-----
+PASTE_YOUR_PROJECT_PUBLIC_KEY_HERE
+-----END PUBLIC KEY-----
+''';
+
+// ---------------------------------------------------------------------------
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +49,65 @@ Future<void> main() async {
     );
     FlutterError.presentError(details);
   };
+  SealedTrace.onException = (error, stack) {
+    debugPrint('example: onException: $error');
+  };
+  SealedTrace.onUploadResult = (r) {
+    debugPrint(
+      'example: onUploadResult: ${r.outcome.name}: '
+      '${r.accepted} accepted, ${r.failed} failed',
+    );
+  };
+
+  await SealedTrace.init(
+    SealedTraceConfig(
+      baseUrl: baseUrl,
+      projectId: projectId,
+      // Passed with --dart-define so the key never lands in source control.
+      apiKey: const String.fromEnvironment('SEALED_TRACE_API_KEY'),
+      publicKeyPem: projectPublicKeyPem,
+      appName: 'sealed_trace_example',
+      // `flutter run --flavor stage` reports `stage`; no flavor means dev.
+      env: SealedTraceEnv(appFlavor ?? 'dev'),
+      minLevel: LogLevel.info,
+    ),
+  );
+  debugPrint('example: init: ${SealedTrace.isInitialized}');
+
+  // User and device info, attached to every later event.
+  SealedTrace.setUser('demo-user', name: 'Demo User');
+  SealedTrace.setContext(await _deviceContext());
+
   runApp(const ExampleApp());
+}
+
+/// The keys the console's device card reads. `os` and `appVersion` are
+/// filled in by the SDK.
+Future<Map<String, dynamic>> _deviceContext() async {
+  final device = <String, dynamic>{
+    'platform': kIsWeb
+        ? 'web'
+        : Platform.isAndroid
+        ? 'android'
+        : Platform.isIOS
+        ? 'ios'
+        : Platform.operatingSystem,
+  };
+  try {
+    if (!kIsWeb && Platform.isAndroid) {
+      final a = await DeviceInfoPlugin().androidInfo;
+      device['deviceId'] = a.id; // e.g. BE2A.250530.026.F3
+      device['deviceModel'] = a.model; // e.g. Pixel 8
+    } else if (!kIsWeb && Platform.isIOS) {
+      final i = await DeviceInfoPlugin().iosInfo;
+      final id = i.identifierForVendor;
+      if (id != null) device['deviceId'] = id;
+      device['deviceModel'] = i.modelName; // e.g. iPhone 15 Pro
+    }
+  } catch (e) {
+    debugPrint('example: device info failed: $e');
+  }
+  return device;
 }
 
 /// The example application.
@@ -40,7 +123,7 @@ class ExampleApp extends StatelessWidget {
   );
 }
 
-/// One screen with every feature of the SDK.
+/// Logs, masks and flushes against the configured server.
 class DemoScreen extends StatefulWidget {
   /// Creates the screen.
   const DemoScreen({super.key});
@@ -50,89 +133,52 @@ class DemoScreen extends StatefulWidget {
 }
 
 class _DemoScreenState extends State<DemoScreen> {
-  final _ingest = MockIngestAdapter();
-  final _messages = <String>[];
-  LogLevel _minLevel = LogLevel.verbose;
-  bool _enabled = true;
-  bool _busy = false;
-  String _lastUpload = 'none yet';
-  DiagnosticSnapshot _diagnostics = SealedTrace.diagnostics;
   Timer? _refresh;
-
-  // An app Dio with the interceptor, talking to a mock API.
-  late final Dio _apiDio = Dio(BaseOptions(baseUrl: 'https://api.example.com'))
-    ..httpClientAdapter = MockApiAdapter()
-    ..interceptors.add(SealedTraceInterceptor());
-
-  // A second Dio for the optional real request to a public echo service.
-  late final Dio _echoDio = Dio()..interceptors.add(SealedTraceInterceptor());
+  final _notes = <String>[];
 
   @override
   void initState() {
     super.initState();
-    _ingest.onReceived = () {
-      if (mounted) setState(() {});
-    };
-    SealedTrace.onException = (error, _) => _note('onException: $error');
-    SealedTrace.onUploadResult = (r) {
-      _lastUpload =
-          '${r.outcome.name}: ${r.accepted} accepted, ${r.failed} failed';
-      if (mounted) setState(() {});
-    };
     _refresh = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _diagnostics = SealedTrace.diagnostics);
+      if (mounted) setState(() {});
     });
-    unawaited(_start());
+    if (!SealedTrace.isInitialized) {
+      // No setState inside initState: add the note directly.
+      const message =
+          'SDK not initialized: fill in the placeholders in lib/main.dart '
+          'and pass SEALED_TRACE_API_KEY';
+      debugPrint('example: $message');
+      _notes.add(message);
+      return;
+    }
+    // Send one batch automatically so the example works without taps.
+    unawaited(
+      Future<void>(() async {
+        _logAll();
+        _logPii();
+        await _flush();
+      }),
+    );
   }
 
   @override
   void dispose() {
     _refresh?.cancel();
-    unawaited(SealedTrace.dispose());
     super.dispose();
-  }
-
-  /// Changing the configuration needs dispose, then init.
-  Future<void> _start() async {
-    setState(() => _busy = true);
-    await SealedTrace.dispose();
-    await SealedTrace.init(
-      SealedTraceConfig(
-        baseUrl: 'https://ingest.mock.invalid', // never contacted in mock mode
-        projectId: 'demo-project',
-        apiKey: 'demo-api-key', // placeholder, not a real key
-        publicKeyPem: demoPublicKeyPem,
-        appName: 'sealed_trace_example',
-        // `flutter run --flavor stage` reports `stage`; no flavor means dev.
-        env: SealedTraceEnv(appFlavor ?? 'dev'),
-        minLevel: _minLevel,
-        enabled: _enabled,
-        uploadConfig: UploadConfig(httpClientAdapter: _ingest),
-      ),
-    );
-    if (SealedTrace.isInitialized) {
-      SealedTrace.setUser('demo-user-1');
-      SealedTrace.setContext({'screen': 'demo'});
-    }
-    _note(
-      'init: ${SealedTrace.isInitialized ? 'ready' : 'not initialized'}'
-      ' (enabled: $_enabled, minLevel: ${_minLevel.name})',
-    );
-    if (mounted) setState(() => _busy = false);
   }
 
   void _note(String message) {
     debugPrint('example: $message');
     if (!mounted) return;
     setState(() {
-      _messages.insert(0, message);
-      if (_messages.length > 30) _messages.removeLast();
+      _notes.insert(0, message);
+      if (_notes.length > 30) _notes.removeLast();
     });
   }
 
   void _logAll() {
-    SealedTrace.v('demo', 'verbose: cache lookup for key home');
-    SealedTrace.d('demo', 'debug: cache miss');
+    SealedTrace.v('demo', 'verbose: dropped (minLevel info)');
+    SealedTrace.d('demo', 'debug: dropped (minLevel info)');
     SealedTrace.i('demo', 'info: user opened the demo screen');
     SealedTrace.w('demo', 'warning: retrying a slow request');
     SealedTrace.e(
@@ -142,204 +188,63 @@ class _DemoScreenState extends State<DemoScreen> {
       stack: StackTrace.current,
     );
     SealedTrace.f('demo', 'fatal: example of an unrecoverable error');
-    _note('logged one event at each of the six levels');
+    _note('logged six levels (verbose and debug dropped)');
   }
 
   void _logPii() {
     SealedTrace.i(
       'auth',
       'sign-in for asha@example.com from +91 98765 43210',
-      meta: {
-        'password': 'hunter2',
-        'card': '4111 1111 1111 1111',
-        'plan': 'pro',
-      },
+      meta: {'password': 'hunter2', 'card': '4111 1111 1111 1111'},
     );
-    _note(
-      'logged PII: email, phone, password and card are masked to *** '
-      'before the event is queued',
-    );
+    _note('logged PII: email, phone, password and card are masked');
   }
 
   Future<void> _flush() async {
     final r = await SealedTrace.flush();
-    _note('flush: ${r.outcome.name} (${r.accepted} accepted)');
-  }
-
-  Future<void> _clear() async {
-    await SealedTrace.clearLocalLogs();
-    _note('clearLocalLogs: everything stored on this device was removed');
-  }
-
-  Future<void> _mockApiCall() async {
-    try {
-      final r = await _apiDio.post<Object>(
-        '/v1/sign-in',
-        data: {'email': 'asha@example.com', 'password': 'hunter2'},
-        options: Options(headers: {'Authorization': 'Bearer demo-secret'}),
-      );
-      _note(
-        'mock API: ${r.statusCode}. The network event masks the password, '
-        'the token, the email and the Authorization header',
-      );
-    } on DioException catch (e) {
-      _note('mock API failed: ${e.type.name}');
-    }
-  }
-
-  Future<void> _echoCall() async {
-    try {
-      final r = await _echoDio.get<Object>(
-        'https://httpbin.org/anything',
-        queryParameters: {'token': 'not-a-real-token', 'page': 2},
-      );
-      _note('echo: ${r.statusCode} (the logged URL shows token=***)');
-    } on DioException catch (e) {
-      _note('echo failed: ${e.type.name} (offline?)');
-    }
+    _note(
+      'flush: ${r.outcome.name} (${r.accepted} accepted, ${r.failed} failed)',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final d = _diagnostics;
+    final d = SealedTrace.diagnostics;
     return Scaffold(
       appBar: AppBar(title: const Text('sealed_trace example')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _Section(
-            title: 'Configuration',
+          Text(
+            'init: ${SealedTrace.isInitialized ? 'ready' : 'not initialized'}',
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              SwitchListTile(
-                title: const Text('enabled'),
-                value: _enabled,
-                onChanged: _busy
-                    ? null
-                    : (v) {
-                        _enabled = v;
-                        unawaited(_start());
-                      },
+              FilledButton(
+                onPressed: _logAll,
+                child: const Text('Log every level'),
               ),
-              ListTile(
-                title: const Text('minLevel'),
-                trailing: DropdownButton<LogLevel>(
-                  value: _minLevel,
-                  onChanged: _busy
-                      ? null
-                      : (v) {
-                          if (v == null) return;
-                          _minLevel = v;
-                          unawaited(_start());
-                        },
-                  items: [
-                    for (final level in LogLevel.values)
-                      DropdownMenuItem(value: level, child: Text(level.name)),
-                  ],
-                ),
+              FilledButton.tonal(
+                onPressed: _logPii,
+                child: const Text('Log with PII'),
               ),
+              OutlinedButton(onPressed: _flush, child: const Text('Flush')),
             ],
           ),
-          _Section(
-            title: 'Log',
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  FilledButton(
-                    onPressed: _logAll,
-                    child: const Text('Log every level'),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: _logPii,
-                    child: const Text('Log with PII'),
-                  ),
-                  OutlinedButton(onPressed: _flush, child: const Text('Flush')),
-                  OutlinedButton(
-                    onPressed: _clear,
-                    child: const Text('Clear local logs'),
-                  ),
-                ],
-              ),
-            ],
+          const SizedBox(height: 12),
+          Text(
+            'accepted ${d.eventsAccepted} · dropped by level '
+            '${d.eventsDroppedLevel} · seal failures ${d.sealFailures} · '
+            'storage failures ${d.storageFailures} · uploads '
+            '${d.uploadAttempts} (failed ${d.uploadFailures})',
           ),
-          _Section(
-            title: 'Dio interceptor',
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  FilledButton.tonal(
-                    onPressed: _mockApiCall,
-                    child: const Text('Mock API call'),
-                  ),
-                  OutlinedButton(
-                    onPressed: _echoCall,
-                    child: const Text('Real call to httpbin.org (optional)'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          _Section(
-            title: 'Diagnostics',
-            children: [
-              Text(
-                'accepted ${d.eventsAccepted} · dropped by level '
-                '${d.eventsDroppedLevel} · seal failures ${d.sealFailures} · '
-                'storage failures ${d.storageFailures} · uploads '
-                '${d.uploadAttempts} (failed ${d.uploadFailures}) · purged '
-                '${d.purgedRows}',
-              ),
-              const SizedBox(height: 4),
-              Text('last upload: $_lastUpload'),
-            ],
-          ),
-          _Section(
-            title: 'Mock ingest server (${_ingest.received.length} envelopes)',
-            children: [
-              const Text(
-                'Only ciphertext reaches the server. Without the project '
-                'private key nobody, including this app, can read it.',
-              ),
-              for (final e in _ingest.received.reversed.take(5))
-                Text(
-                  '${e.batchId.substring(0, 8)}…  ${e.eventCount} events, '
-                  '${e.ciphertextBytes} encrypted bytes',
-                  style: const TextStyle(fontFamily: 'monospace'),
-                ),
-            ],
-          ),
-          _Section(
-            title: 'Activity',
-            children: [for (final m in _messages) Text('• $m')],
-          ),
+          const Divider(),
+          for (final n in _notes) Text('• $n'),
         ],
       ),
     );
   }
-}
-
-class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.children});
-
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    margin: const EdgeInsets.only(bottom: 12),
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          ...children,
-        ],
-      ),
-    ),
-  );
 }

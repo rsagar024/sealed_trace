@@ -22,6 +22,7 @@ class MaskingEngine {
     MaskConfig config, {
     void Function(Object error, StackTrace stack)? onError,
   }) : replacement = config.replacement,
+       _maskUserName = config.maskUserName,
        _onError = onError {
     if (config.useDefaultKeys) {
       _keys.addAll(defaultSensitiveKeys.map(_normalize));
@@ -41,6 +42,7 @@ class MaskingEngine {
   /// Text that replaces masked values.
   final String replacement;
 
+  final bool _maskUserName;
   final void Function(Object error, StackTrace stack)? _onError;
   final Set<String> _keys = <String>{};
   final Set<String> _headerDenylist = <String>{};
@@ -157,15 +159,19 @@ class MaskingEngine {
   /// Masks every free-text part of [record].
   ///
   /// `id`, `seq`, `ts`, `level`, `tag`, `sessionId`, `userId` and the SDK's own
-  /// context keys are left alone. `ctx.userName` is always replaced.
+  /// context keys are left alone. `ctx.userName` and `ctx.userDisplayName`,
+  /// set only by `SealedTrace.setUser`, are sent as given so the console can
+  /// show who each user is; `MaskConfig.maskUserName` replaces `userName`.
   LogRecord maskRecord(LogRecord record) {
     final seen = HashSet<Object>.identity();
     final ctx = <String, dynamic>{};
     for (final entry in record.ctx.entries) {
       final key = entry.key;
       if (key == 'userName') {
-        ctx[key] = entry.value == null ? null : replacement;
-      } else if (coreContextKeys.contains(key)) {
+        ctx[key] = _maskUserName && entry.value != null
+            ? replacement
+            : entry.value;
+      } else if (key == userDisplayNameKey || coreContextKeys.contains(key)) {
         ctx[key] = entry.value;
       } else if (isSensitiveKey(key) && entry.value != null) {
         ctx[key] = replacement;

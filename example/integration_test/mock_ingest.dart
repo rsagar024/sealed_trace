@@ -83,29 +83,3 @@ class MockIngestAdapter implements HttpClientAdapter {
   @override
   void close({bool force = false}) {}
 }
-
-/// A pretend REST API for the Dio demo. It answers a sign-in call with a
-/// token and a profile, so the logged network event shows masking at work.
-class MockApiAdapter implements HttpClientAdapter {
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async {
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    return ResponseBody.fromString(
-      jsonEncode({
-        'access_token': 'demo-token-not-real',
-        'user': {'id': 'u-42', 'email': 'asha@example.com', 'name': 'Asha'},
-      }),
-      200,
-      headers: {
-        Headers.contentTypeHeader: [Headers.jsonContentType],
-      },
-    );
-  }
-
-  @override
-  void close({bool force = false}) {}
-}

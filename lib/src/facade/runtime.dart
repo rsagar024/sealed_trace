@@ -55,6 +55,10 @@ class Runtime {
   /// Current user display name, or null.
   String? userName;
 
+  /// Readable user name sent as `ctx.userDisplayName`, already trimmed and
+  /// cut to length. Null when unset or when `sendUserDisplayName` is false.
+  String? userDisplayName;
+
   /// Extra context merged into every event. Values are already JSON-safe.
   final Map<String, dynamic> context = {};
 
@@ -81,6 +85,7 @@ class Runtime {
         timestamp: timestamp,
         userId: userId,
         userName: userName,
+        userDisplayName: userDisplayName,
         extraContext: context,
       ),
     );

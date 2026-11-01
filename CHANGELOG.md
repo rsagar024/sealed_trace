@@ -13,6 +13,14 @@ First release.
   `SealedTraceEnv('qa')` or `SealedTraceEnv(appFlavor ?? 'dev')` with Flutter
   flavors. Names are 1 to 32 characters of `a-z`, `0-9`, `_` or `-`; any other
   name leaves the SDK disabled. See "Environments & flavors" in the README.
+- **Readable user names in the console.** `setUser(id, name: ...)` trims the
+  name, cuts it to 256 characters and sends it as given in `ctx.userName` and
+  `ctx.userDisplayName`, inside the sealed envelope, so the console shows who
+  each user is. Blank names are not sent, and `setUser(null)` clears both.
+  Only `setUser` sets `userDisplayName`; a value passed to `setContext` is
+  ignored. `MaskConfig(maskUserName: true)` sends `***` in `ctx.userName`, and
+  `SealedTraceConfig(sendUserDisplayName: false)` never sends
+  `userDisplayName`.
 - **Never throws, zero cost when disabled.** Every public call is guarded.
   With `enabled: false`, or below `minLevel`, a call returns before anything
   is allocated.
@@ -52,14 +60,3 @@ First release.
 - **Web page exit.** When the page is hidden or closed, queued events are
   sealed synchronously into a `localStorage` spill (ciphertext only) and moved
   to IndexedDB at the next start.
-
-### Known limitations
-
-- The AES-GCM and RSA-OAEP code is this package's own, has not had an
-  independent security review, and is not constant-time.
-- Up to 2 seconds of events can be lost if the process is killed without a
-  lifecycle event.
-- Masking has documented gaps. Keys outside the default list (for example
-  `authorization`) are not masked in your own metadata unless you add them.
-- Not yet verified on Safari, iOS, macOS, Linux, a Windows desktop build, or
-  a low-end device. Never run against the production server.

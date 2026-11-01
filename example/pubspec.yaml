@@ -1,5 +1,5 @@
 name: sealed_trace_example
-description: "Demonstrates the sealed_trace logging SDK: levels, masking, Dio, flush, clear and diagnostics."
+description: "Demonstrates the sealed_trace logging SDK against a live server: levels, masking, user and device context, flush and diagnostics."
 publish_to: 'none'
 version: 1.0.0
 
@@ -12,9 +12,10 @@ dependencies:
     sdk: flutter
   sealed_trace:
     path: ..
-  dio: ^5.11.1
+  device_info_plus: ^13.3.0
 
 dev_dependencies:
+  dio: ^5.11.1
   flutter_test:
     sdk: flutter
   integration_test:

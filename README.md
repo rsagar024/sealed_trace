@@ -166,7 +166,34 @@ Two rules to know up front:
      runApp(const MyApp());
    }
    ```
-4. Log anywhere. Every call returns at once and never throws:
+4. **Required:** attach the user and the device, right after `init`:
+   ```dart
+   SealedTrace.setUser('user-42', name: 'Asha Rao');      // id: opaque, never an email; name: see below
+   SealedTrace.setContext({
+     'deviceId': '<device id>',       // Android: androidInfo.id · iOS: iosInfo.identifierForVendor
+     'deviceModel': '<device model>', // Android: androidInfo.model · iOS: iosInfo.modelName
+   });
+   ```
+   The `name` is trimmed, cut to 256 characters and sent as given in `ctx.userName` (plus `ctx.userDisplayName`
+   for the console's Users tab), so the console shows who each user is in the Users tab, the log list and log
+   detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
+   `MaskConfig(maskUserName: true)` to send `***` in `ctx.userName` instead. `setUser(null)` clears both.
+
+   The console's device card reads these keys, read with
+   [`device_info_plus`](https://pub.dev/packages/device_info_plus):
+
+   | Key | Android | iOS |
+   |---|---|---|
+   | `deviceId` | `androidInfo.id` | `iosInfo.identifierForVendor` |
+   | `deviceModel` | `androidInfo.model` | `iosInfo.modelName` |
+
+   - Don't set `platform`, `os`, `appVersion`, `buildNumber`, `locale`, `env` or `network`. The SDK fills them in,
+     and its values win over `setContext`.
+   - Call both after `await SealedTrace.init(...)`. Before init they do nothing.
+   - See `_deviceContext()` in
+     [`example/lib/main.dart`](https://github.com/rsagar024/sealed_trace/blob/master/example/lib/main.dart) for the
+     full code.
+5. Log anywhere. Every call returns at once and never throws:
    ```dart
    SealedTrace.v('cache', 'hit', meta: {'key': 'home'});
    SealedTrace.d('cache', 'miss');
@@ -175,9 +202,8 @@ Two rules to know up front:
    SealedTrace.e('payment', 'charge failed', error: e, stack: s);
    SealedTrace.f('app', 'unrecoverable', error: e, stack: s);
    ```
-5. Optionally, attach the user and the Dio interceptor, and clear on sign-out:
+6. Optionally, add the Dio interceptor, and clear on sign-out:
    ```dart
-   SealedTrace.setUser('user-42');                        // an opaque id, never an email or a name
    final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 
    await SealedTrace.clearLocalLogs();                    // on sign-out
@@ -205,6 +231,7 @@ Two rules to know up front:
 | `retentionConfig` | `RetentionConfig()` | [Retention](#retentionconfig). |
 | `networkLogConfig` | `NetworkLogConfig()` | [Dio interceptor](#networklogconfig). |
 | `verboseInternalLogs` | `false` | Prints the SDK's own diagnostics with `debugPrint`. These never contain log content. |
+| `sendUserDisplayName` | `true` | Also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. `false` never sends it. |
 | `databaseDirectory` | `null` | Where the SQLite file lives. Defaults to the application support directory. Pure-Dart apps must set it, or the SDK uses memory storage. |
 
 <a id="maskconfig"></a>
@@ -219,6 +246,7 @@ Two rules to know up front:
 | `useDefaultKeys` | `true` | `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `api_key`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `first_name`, `last_name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv` |
 | `useDefaultPatterns` | `true` | Email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. |
 | `replacement` | `'***'` | Replacement text. |
+| `maskUserName` | `false` | `true` sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. By default the name is sent as given so the console can show it. |
 
 The headers `Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` are always masked in network logs, even with
 `useDefaultKeys: false`.
@@ -283,8 +311,8 @@ SealedTrace.e('tag', 'message', error: error, stack: stack);
 SealedTrace.log(LogEvent(level: LogLevel.warning, tag: 'tag', message: 'message'));
 
 // Context: these do nothing before init has completed.
-SealedTrace.setUser('user-42', name: 'Asha');   // the name is always stored as "***"
-SealedTrace.setContext({'plan': 'pro'});
+SealedTrace.setUser('user-42', name: 'Asha');   // shown as "Asha" in the console; MaskConfig.maskUserName hides it
+SealedTrace.setContext({'deviceId': id, 'deviceModel': model});   // required keys; extra keys are allowed
 SealedTrace.addMaskKeys(['iban']);
 SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));
 
@@ -371,7 +399,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 - Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
   data.
-- The example app uses a demo-only public key whose private key was never saved.
+- The example's integration test uses a demo-only public key whose private key was never saved.
 
 <a id="environments"></a>
 
@@ -480,7 +508,9 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   bearer token you log by hand stays encrypted, but the server sees it. Add such keys with `extraKeys` or
   `addMaskKeys`. (The Dio interceptor masks credential headers and bearer tokens in bodies on its own.)
 - **`userId`, `tag` and the device context are never masked.** Don't put personal data in them. A name passed to
-  `setUser(name:)` is always replaced with `***`.
+  `setUser(name:)` is sent as given in `ctx.userName` and `ctx.userDisplayName`, inside the sealed envelope, so
+  the server can show it. Set `MaskConfig(maskUserName: true)` and `sendUserDisplayName: false` to keep it on the
+  device.
 - **The crypto has not been audited and is not constant-time.** Every envelope uses a fresh key once, and only the
   public-key operation runs on the device, which limits the exposure but does not remove it.
 
@@ -612,24 +642,24 @@ The floor of every constraint is the version above, which was the latest release
 
 ## 📱 Example app
 
-The [`example/`](https://github.com/rsagar024/sealed_trace/blob/master/example) app is a one-screen tour:
+The [`example/`](https://github.com/rsagar024/sealed_trace/blob/master/example) app is a one-screen example against
+your own server:
 
-- all six levels;
+- all six levels (`verbose` and `debug` dropped at `minLevel: info`);
 - a log with personal data (shown masked);
-- `minLevel` and `enabled` switches (re-init with `dispose` + `init`);
-- Flush and Clear;
-- live diagnostics and the last upload result;
-- the Dio interceptor against a mock API.
+- a user id and display name, and device context from `device_info_plus`;
+- Flush, live diagnostics and the upload result.
+
+Replace the `baseUrl`, `projectId` and `projectPublicKeyPem` placeholders in `example/lib/main.dart`, then:
 
 ```sh
 cd example
-flutter run                                   # Android, iOS, web, Windows, macOS, Linux
-flutter test integration_test -d <device>     # drives the demo on a device or emulator
+flutter run --dart-define=SEALED_TRACE_API_KEY=<your-api-key>   # Android, iOS, web, Windows, macOS, Linux
+flutter test integration_test -d <device>                       # offline, drives the app on a device or emulator
 ```
 
-It runs **offline**: uploads go to a mock ingest server plugged in through `UploadConfig(httpClientAdapter: ...)`, and
-the API key and public key are demo placeholders. One button sends a single, optional, real request to
-`httpbin.org`.
+The integration test runs **offline**: it uploads to a mock ingest server plugged in through
+`UploadConfig(httpClientAdapter: ...)` and seals with a demo-only public key.
 
 <a id="migration-notes"></a>
 

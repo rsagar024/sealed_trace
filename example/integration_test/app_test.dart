@@ -3,22 +3,18 @@
 //   cd example
 //   flutter test integration_test -d <device>
 //
-// It taps through the demo and checks that events are accepted, that the
-// mock ingest server receives sealed envelopes, and that the SDK reported no
-// problem. It sends no request to the optional public echo service.
+// It runs offline: the SDK is initialized here with a demo-only public key
+// and a mock ingest server, because pumpWidget does not run main(). It checks
+// that the screen's events are accepted, that the mock server receives sealed
+// envelopes, and that the SDK reported no problem.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sealed_trace/sealed_trace.dart';
 import 'package:sealed_trace_example/main.dart';
 
-Future<void> _tap(WidgetTester tester, String label) async {
-  final button = find.text(label);
-  await tester.scrollUntilVisible(button, 200);
-  await tester.tap(button);
-  await tester.pump(const Duration(milliseconds: 300));
-}
+import 'demo_key.dart';
+import 'mock_ingest.dart';
 
 /// Pumps until [condition] holds or [timeout] passes.
 Future<void> _pumpUntil(
@@ -35,40 +31,43 @@ Future<void> _pumpUntil(
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('the demo logs, masks, uploads to the mock server and clears', (
+  testWidgets('the example logs, masks and uploads sealed envelopes', (
     tester,
   ) async {
-    await tester.pumpWidget(const ExampleApp());
-    await _pumpUntil(tester, () => SealedTrace.isInitialized);
+    final ingest = MockIngestAdapter();
+    final exceptions = <Object>[];
+    SealedTrace.onException = (error, _) => exceptions.add(error);
+
+    await SealedTrace.init(
+      SealedTraceConfig(
+        baseUrl: 'https://ingest.mock.invalid', // never contacted
+        projectId: 'demo-project',
+        apiKey: 'demo-api-key', // placeholder, not a real key
+        publicKeyPem: demoPublicKeyPem,
+        appName: 'sealed_trace_example',
+        env: SealedTraceEnv('dev'),
+        minLevel: LogLevel.info,
+        uploadConfig: UploadConfig(httpClientAdapter: ingest),
+      ),
+    );
     expect(SealedTrace.isInitialized, isTrue);
+    SealedTrace.setUser('demo-user', name: 'Demo User');
 
-    await _tap(tester, 'Log every level');
-    await _tap(tester, 'Log with PII');
-    await _tap(tester, 'Mock API call');
-    await tester.pump(const Duration(seconds: 1));
-    await _tap(tester, 'Flush');
+    // The screen logs and flushes once on start.
+    await tester.pumpWidget(const ExampleApp());
 
-    // 6 levels + 1 PII event + 1 network event from the interceptor.
-    await _pumpUntil(tester, () => SealedTrace.diagnostics.eventsAccepted >= 8);
-    expect(SealedTrace.diagnostics.eventsAccepted, greaterThanOrEqualTo(8));
+    // info, warning, error, fatal + 1 PII event; verbose and debug dropped.
+    await _pumpUntil(tester, () => SealedTrace.diagnostics.eventsAccepted >= 5);
+    expect(SealedTrace.diagnostics.eventsAccepted, greaterThanOrEqualTo(5));
 
-    final server = find.textContaining('Mock ingest server (');
-    await _pumpUntil(tester, () {
-      final w = tester.widgetList<Text>(server);
-      return w.isNotEmpty && !w.first.data!.contains('(0 envelopes)');
-    });
-    final title = tester.widget<Text>(server).data!;
-    expect(title, isNot(contains('(0 envelopes)')), reason: title);
+    await tester.tap(find.text('Flush'));
+    await _pumpUntil(tester, () => ingest.received.isNotEmpty);
+    expect(ingest.received, isNotEmpty);
 
-    expect(find.textContaining('onException'), findsNothing);
+    expect(exceptions, isEmpty);
     expect(SealedTrace.diagnostics.sealFailures, 0);
     expect(SealedTrace.diagnostics.storageFailures, 0);
 
-    await _tap(tester, 'Clear local logs');
-    await _pumpUntil(
-      tester,
-      () => find.textContaining('clearLocalLogs').evaluate().isNotEmpty,
-    );
-    expect(find.textContaining('clearLocalLogs'), findsWidgets);
+    await SealedTrace.dispose();
   });
 }

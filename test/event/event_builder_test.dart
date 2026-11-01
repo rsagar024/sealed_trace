@@ -148,6 +148,47 @@ void main() {
     expect(record.ctx['userName'], 'Asha');
   });
 
+  test('userDisplayName comes only from the parameter', () {
+    final builder = _builder();
+    final fromSetContext = builder.build(
+      level: LogLevel.info,
+      tag: 't',
+      message: 'm',
+      extraContext: {'userDisplayName': 'Spoof', 'feature': 'beta'},
+    );
+    expect(fromSetContext.ctx.containsKey('userDisplayName'), isFalse);
+    expect(fromSetContext.ctx['feature'], 'beta');
+
+    final fromSetUser = builder.build(
+      level: LogLevel.info,
+      tag: 't',
+      message: 'm',
+      userName: 'Asha',
+      userDisplayName: 'Asha',
+      extraContext: {'userDisplayName': 'Spoof'},
+    );
+    expect(fromSetUser.ctx['userDisplayName'], 'Asha');
+  });
+
+  group('normalizeUserDisplayName', () {
+    test('trims and drops blank names', () {
+      expect(normalizeUserDisplayName('  Demo User  '), 'Demo User');
+      expect(normalizeUserDisplayName(null), isNull);
+      expect(normalizeUserDisplayName(''), isNull);
+      expect(normalizeUserDisplayName(' \t\n '), isNull);
+    });
+
+    test('cuts to 256 code units', () {
+      expect(normalizeUserDisplayName('a' * 300), 'a' * 256);
+      expect(normalizeUserDisplayName('a' * 256), 'a' * 256);
+    });
+
+    test('never splits a surrogate pair at the cut', () {
+      final name = '${'a' * 255}\u{1F600}tail';
+      expect(normalizeUserDisplayName(name), 'a' * 255);
+    });
+  });
+
   test('custom env names are reported as is', () {
     final record = _builder(
       env: const SealedTraceEnv('qa'),

@@ -21,6 +21,30 @@ const Set<String> coreContextKeys = <String>{
   'network',
 };
 
+/// Context key for the readable user name set by `SealedTrace.setUser`.
+///
+/// Masking leaves it alone and only `setUser` can set it. The server uses it
+/// for the Users tab only and drops it from stored log context.
+const String userDisplayNameKey = 'userDisplayName';
+
+/// Longest `ctx.userDisplayName` the server accepts, in UTF-16 code units.
+const int maxUserDisplayNameLength = 256;
+
+/// Trims [name] and cuts it to [maxUserDisplayNameLength] without splitting a
+/// surrogate pair. Returns null when [name] is null or blank.
+String? normalizeUserDisplayName(String? name) {
+  if (name == null) return null;
+  var value = name.trim();
+  if (value.isEmpty) return null;
+  if (value.length > maxUserDisplayNameLength) {
+    var end = maxUserDisplayNameLength;
+    final last = value.codeUnitAt(end - 1);
+    if (last >= 0xD800 && last <= 0xDBFF) end--;
+    value = value.substring(0, end).trimRight();
+  }
+  return value.isEmpty ? null : value;
+}
+
 /// Stamps caller input into a [LogRecord].
 class EventBuilder {
   /// Creates a builder for one app run.
@@ -78,12 +102,16 @@ class EventBuilder {
     DateTime? timestamp,
     String? userId,
     String? userName,
+    String? userDisplayName,
     Map<String, dynamic> extraContext = const <String, dynamic>{},
   }) {
     builtCount++;
     final at = timestamp ?? clock.now();
     final ctx = <String, dynamic>{...extraContext};
+    // Owned by setUser: a value from setContext is never sent.
+    ctx.remove(userDisplayNameKey);
     if (userName != null) ctx['userName'] = userName;
+    if (userDisplayName != null) ctx[userDisplayNameKey] = userDisplayName;
     ctx.addAll(_core);
     ctx['network'] = network.current();
 

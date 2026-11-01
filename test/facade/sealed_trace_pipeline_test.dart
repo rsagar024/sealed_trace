@@ -66,7 +66,7 @@ void main() {
     expect(json['ts'], '2026-01-01T10:00:00.000Z');
     final ctx = json['ctx'] as Map<String, dynamic>;
     expect(ctx['feature'], 'beta');
-    expect(ctx['userName'], '***'); // always masked (A46)
+    expect(ctx['userName'], 'Asha'); // readable unless maskUserName
     expect(ctx['platform'], 'android');
   });
 

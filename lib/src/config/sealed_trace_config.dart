@@ -23,6 +23,7 @@ class SealedTraceConfig {
     this.networkLogConfig = const NetworkLogConfig(),
     this.verboseInternalLogs = false,
     this.databaseDirectory,
+    this.sendUserDisplayName = true,
   });
 
   /// Server base URL. Uploads go to `{baseUrl}/api/v1/ingest/logs`.
@@ -69,6 +70,14 @@ class SealedTraceConfig {
   /// `path_provider` application support directory is used.
   final String? databaseDirectory;
 
+  /// Sends the name passed to `SealedTrace.setUser(name:)` unmasked as
+  /// `ctx.userDisplayName`, so the console's Users tab can show it.
+  ///
+  /// The name travels only inside the sealed envelope, and the server never
+  /// shows it in log views, where `ctx.userName` stays masked. Set to false to
+  /// keep the readable name on the device.
+  final bool sendUserDisplayName;
+
   /// Returns a copy with the given fields replaced.
   SealedTraceConfig copyWith({
     String? baseUrl,
@@ -85,6 +94,7 @@ class SealedTraceConfig {
     NetworkLogConfig? networkLogConfig,
     bool? verboseInternalLogs,
     String? databaseDirectory,
+    bool? sendUserDisplayName,
   }) {
     return SealedTraceConfig(
       baseUrl: baseUrl ?? this.baseUrl,
@@ -101,6 +111,7 @@ class SealedTraceConfig {
       networkLogConfig: networkLogConfig ?? this.networkLogConfig,
       verboseInternalLogs: verboseInternalLogs ?? this.verboseInternalLogs,
       databaseDirectory: databaseDirectory ?? this.databaseDirectory,
+      sendUserDisplayName: sendUserDisplayName ?? this.sendUserDisplayName,
     );
   }
 
@@ -120,7 +131,8 @@ class SealedTraceConfig {
       retentionConfig == other.retentionConfig &&
       networkLogConfig == other.networkLogConfig &&
       verboseInternalLogs == other.verboseInternalLogs &&
-      databaseDirectory == other.databaseDirectory;
+      databaseDirectory == other.databaseDirectory &&
+      sendUserDisplayName == other.sendUserDisplayName;
 
   @override
   int get hashCode => Object.hash(
@@ -138,6 +150,7 @@ class SealedTraceConfig {
     networkLogConfig,
     verboseInternalLogs,
     databaseDirectory,
+    sendUserDisplayName,
   );
 
   // Deliberately omits apiKey so a config never leaks the key into logs.
