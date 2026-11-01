@@ -20,6 +20,11 @@ sealed_trace.txt
 IMPLEMENTATION.md
 SEALEDTRACE_PLATFORM_SPEC.md
 
+# Repo-only files (GitHub social preview and so on).
+.github/
+# Source art for the example app icons (generated icons are kept).
+example/assets/
+
 # IDE files
 .idea/
 *.iml

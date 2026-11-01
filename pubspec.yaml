@@ -10,6 +10,12 @@ topics:
   - privacy
   - observability
 
+screenshots:
+  - description: "sealed_trace logo"
+    path: doc/images/logo.webp
+  - description: "sealed_trace banner: secure offline logging for Flutter and Dart"
+    path: doc/images/banner.webp
+
 environment:
   sdk: ">=3.10.0 <4.0.0"
   flutter: ">=3.38.1"
