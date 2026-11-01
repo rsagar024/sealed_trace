@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rsagar024/sealed_trace/master/doc/images/banner.webp" alt="sealed_trace: secure offline logging for Flutter and Dart" width="800">
+</p>
+
 # sealed_trace 🔐
 
 [![pub package](https://img.shields.io/pub/v/sealed_trace.svg)](https://pub.dev/packages/sealed_trace)
