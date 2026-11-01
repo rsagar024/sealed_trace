@@ -172,7 +172,7 @@ Two rules to know up front:
    ```
 4. **Required:** attach the user and the device, right after `init`:
    ```dart
-   SealedTrace.setUser('user-42', name: 'Asha Rao');      // id: opaque, never an email; name: see below
+   SealedTrace.setUser('<user id>', name: '<user name>');      // id: opaque, never an email; name: see below
    SealedTrace.setContext({
      'deviceId': '<device id>',       // Android: androidInfo.id · iOS: iosInfo.identifierForVendor
      'deviceModel': '<device model>', // Android: androidInfo.model · iOS: iosInfo.modelName
