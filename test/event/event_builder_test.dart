@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sealed_trace/sealed_trace.dart';
 import 'package:sealed_trace/src/event/event_builder.dart';
+import 'package:sealed_trace/src/event/log_record.dart';
 import 'package:sealed_trace/src/event/sequence_counter.dart';
+import 'package:sealed_trace/src/platform/clock.dart';
 import 'package:sealed_trace/src/platform/network_state.dart';
 
 import '../helpers/fakes.dart';
@@ -99,6 +101,33 @@ void main() {
     expect(record.timestamp.isUtc, isTrue);
     // 05:06:07 at +05:30 is 23:36:07 UTC on the previous day.
     expect(record.toJson()['ts'], '2026-03-03T23:36:07.123Z');
+  });
+
+  test('a LogRecord built with a local time is stored and sent as UTC', () {
+    final local = DateTime(2026, 3, 4, 5, 6, 7, 123);
+    final record = LogRecord(
+      id: 'id',
+      seq: 1,
+      timestamp: local,
+      level: LogLevel.info,
+      tag: 't',
+      message: 'm',
+      error: null,
+      stackTrace: null,
+      metadata: const <String, dynamic>{},
+      sessionId: 's',
+      userId: null,
+      ctx: const <String, dynamic>{},
+    );
+    expect(record.timestamp.isUtc, isTrue);
+    expect(record.timestamp.isAtSameMomentAs(local), isTrue);
+    final ts = record.toJson()['ts'] as String;
+    expect(ts, endsWith('Z'));
+    expect(DateTime.parse(ts).isAtSameMomentAs(local), isTrue);
+  });
+
+  test('SystemClock returns UTC', () {
+    expect(const SystemClock().now().isUtc, isTrue);
   });
 
   test('seq increases by one per record', () {

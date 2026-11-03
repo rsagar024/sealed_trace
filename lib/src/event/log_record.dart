@@ -11,7 +11,7 @@ class LogRecord {
   LogRecord({
     required this.id,
     required this.seq,
-    required this.timestamp,
+    required DateTime timestamp,
     required this.level,
     required this.tag,
     required this.message,
@@ -21,7 +21,7 @@ class LogRecord {
     required this.sessionId,
     required this.userId,
     required this.ctx,
-  });
+  }) : timestamp = timestamp.toUtc();
 
   /// uuid-v4.
   final String id;
@@ -91,7 +91,7 @@ class LogRecord {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'seq': seq,
-    'ts': timestamp.toIso8601String(),
+    'ts': timestamp.toUtc().toIso8601String(),
     'level': level.name,
     'tag': tag,
     'message': message,
