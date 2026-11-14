@@ -150,7 +150,11 @@ void main() {
     test('init moves envelopes left in the spill into storage', () async {
       final adapter = MemoryStorageAdapter();
       final spill = MemoryEnvelopeSpill()
-        ..write(makeEnvelope(id: 'left-behind', eventCount: 2));
+        ..write(makeEnvelope(
+          id: 'left-behind',
+          eventCount: 2,
+          projectId: 'proj-1',
+        ));
       _install(custom: overrides(adapter, spill, FakeLifecycle()));
       await SealedTrace.init(_config);
 

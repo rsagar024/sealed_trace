@@ -167,8 +167,16 @@ void main() {
 
   test('recover moves spilled envelopes oldest first', () async {
     final rig = _Rig();
-    final newer = makeEnvelope(id: 'b', createdAt: DateTime.utc(2026, 1, 2));
-    final older = makeEnvelope(id: 'a', createdAt: DateTime.utc(2026, 1, 1));
+    final newer = makeEnvelope(
+      id: 'b',
+      createdAt: DateTime.utc(2026, 1, 2),
+      projectId: 'p',
+    );
+    final older = makeEnvelope(
+      id: 'a',
+      createdAt: DateTime.utc(2026, 1, 1),
+      projectId: 'p',
+    );
     rig.spill.write(newer);
     rig.spill.write(older);
     expect(await rig.saver.recover(), 2);

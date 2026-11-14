@@ -359,7 +359,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | Retries | Exponential backoff with jitter. After 5 failed attempts an envelope becomes a dead letter, retried once per app start and kept for 7 days. |
 | Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads until the next `init`; data is kept. `413` → halve the request. `429` → wait for `Retry-After`. Redirects (`3xx`, or one the browser followed) are never followed and count as a failure, so the key and envelopes never go elsewhere and a redirected `202` is never trusted. A response body over 256 KB is not read and counts as a failure. Anything else → retry later. |
 | Dio interceptor | One `network` event per call, masked: URL, headers, bodies (JSON keys, form fields, bearer tokens), status and duration. Levels: 2xx is `debug`, 4xx is `warning`, and 5xx or no response is `error`. |
-| Web page exit | `visibilitychange` (hidden) and `pagehide` seal the queue synchronously into `localStorage`. The spill moves to IndexedDB at once, or at the next start. |
+| Web page exit | `visibilitychange` (hidden) and `pagehide` seal the queue synchronously into `localStorage`. The spill moves to IndexedDB at once, or at the next start. At recovery, entries are checked (format, sizes, consistent index columns, key matching the batch id) and only the configured project's, not dated more than a day ahead, and at most the newest 200 are kept; the rest are dropped and counted in `spillEntriesRejected`. **The spill is not tamper-proof:** any script on your origin (an XSS payload, a compromised third-party script) can read, delete or add entries. It holds only ciphertext, so it cannot read logs, but it can suppress them or add envelopes built with the public key. |
 | Lifecycle | `init` is idempotent; to change the config, call `dispose` then `init`. Calls made before `init` finishes are dropped. |
 | Testing | `UploadConfig(httpClientAdapter: …)` points uploads at a fake server; `enabled: false` turns the SDK off completely. |
 
@@ -386,6 +386,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `envelopesDeadLettered` | Envelopes that gave up after `maxAttempts`, or were rejected for good. |
 | `purgedRows` | Envelopes removed by retention. |
 | `internalExceptions` | Errors caught inside the SDK. |
+| `spillEntriesRejected` | Web page-exit spill entries dropped at recovery: another project's, dated in the future, or over the cap of 200. |
 | `configValuesAdjusted` | Configuration values `init` raised to their floor or clamped (see the upload and retention tables). |
 
 ### What `onException` reports

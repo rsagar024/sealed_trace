@@ -136,3 +136,11 @@ First release.
   A zero interval or backoff can no longer spin a timer or cause a retry
   storm. Each adjustment is counted in `diagnostics.configValuesAdjusted`
   and printed.
+- **Web spill recovery is stricter.** Entries recovered from the
+  `localStorage` spill must have the exact key, IV and tag sizes, a
+  ciphertext matching its declared size, consistent index columns, a key
+  equal to the batch id, the configured `projectId`, and a `createdAt` no
+  more than a day ahead. At most the newest 200 are recovered. Dropped
+  entries are counted in `diagnostics.spillEntriesRejected`. The README
+  now states that the spill is not tamper-proof against same-origin
+  scripts.
