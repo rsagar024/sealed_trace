@@ -176,6 +176,10 @@ class _Ghash {
   static int _word(Uint8List b, int o) =>
       (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
 
+  /// 0xffffffff when [bit] is 1, 0 when it is 0, without a branch. Holds on
+  /// the VM (64-bit ints) and on JavaScript (32-bit bitwise operations).
+  static int _mask(int bit) => (-bit) & 0xffffffff;
+
   /// Absorbs [data] as part of the current run of blocks.
   void update(Uint8List data) {
     var offset = 0;
@@ -233,7 +237,9 @@ class _Ghash {
     final x2 = _y2 ^ _word(block, offset + 8);
     final x3 = _y3 ^ _word(block, offset + 12);
 
-    // Z = X * H, one bit of X at a time from the leftmost bit.
+    // Z = X * H, one bit of X at a time from the leftmost bit. Branch-free
+    // (L5): each step uses an all-ones or all-zeros mask derived from the
+    // bit instead of an `if`, so the work does not depend on X or H.
     var z0 = 0;
     var z1 = 0;
     var z2 = 0;
@@ -251,18 +257,16 @@ class _Ghash {
           ? x2
           : x3;
       for (var bit = 31; bit >= 0; bit--) {
-        if (((x >>> bit) & 1) == 1) {
-          z0 ^= v0;
-          z1 ^= v1;
-          z2 ^= v2;
-          z3 ^= v3;
-        }
-        final carry = v3 & 1;
+        final take = _mask((x >>> bit) & 1);
+        z0 ^= v0 & take;
+        z1 ^= v1 & take;
+        z2 ^= v2 & take;
+        z3 ^= v3 & take;
+        final reduce = _mask(v3 & 1);
         v3 = ((v3 >>> 1) | ((v2 & 1) << 31)) & 0xffffffff;
         v2 = ((v2 >>> 1) | ((v1 & 1) << 31)) & 0xffffffff;
         v1 = ((v1 >>> 1) | ((v0 & 1) << 31)) & 0xffffffff;
-        v0 = v0 >>> 1;
-        if (carry == 1) v0 ^= 0xe1000000;
+        v0 = (v0 >>> 1) ^ (0xe1000000 & reduce);
       }
     }
     _y0 = z0 & 0xffffffff;

@@ -13,15 +13,25 @@ import 'gcm.dart';
 /// sealing never fails because of it.
 AesGcmOffload platformAesGcmOffload() => (job) async {
   try {
-    return await webCryptoAesGcm(job);
+    final result = await webCryptoAesGcm(job);
+    webCryptoUses++;
+    return result;
   } catch (_) {
     webCryptoFallbacks++;
     return runAesGcm(job);
   }
 };
 
+/// Payload size above which [platformAesGcmOffload] is used. On the web,
+/// every asynchronous seal uses WebCrypto: the browser's AES is native and
+/// constant-time, unlike the table-based pure-Dart cipher (L5).
+const int platformOffloadThresholdBytes = 0;
+
 /// How many jobs fell back to pure Dart. For diagnostics and the web check.
 int webCryptoFallbacks = 0;
+
+/// How many jobs WebCrypto encrypted. For diagnostics and the web check.
+int webCryptoUses = 0;
 
 /// AES-256-GCM of [job] with WebCrypto, with a 128-bit tag and the job's
 /// additional data. Throws if WebCrypto is unavailable.

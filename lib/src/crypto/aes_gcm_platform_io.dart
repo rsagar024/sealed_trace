@@ -7,3 +7,7 @@ import 'crypto_backend.dart';
 /// key and plaintext when it is done.
 AesGcmOffload platformAesGcmOffload() =>
     (job) => compute(runAesGcmAndWipe, job);
+
+/// Payload size above which [platformAesGcmOffload] is used: starting an
+/// isolate costs more than encrypting a small batch inline.
+const int platformOffloadThresholdBytes = 8 * 1024;

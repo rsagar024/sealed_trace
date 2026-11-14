@@ -47,7 +47,7 @@ First release.
     vectors in
     `test/vectors/envelope_vectors.json`.
   - Large batches are sealed in a background isolate on native platforms
-    and with WebCrypto on the web.
+    and with WebCrypto on the web (every asynchronous seal).
 - **Offline storage of ciphertext only.**
   - SQLite (drift) on native platforms, IndexedDB on the web.
   - Retention by count, age and size, with an emergency purge when storage is
@@ -149,3 +149,9 @@ First release.
   RSA-OAEP DB, masks and EM, the OAEP seed, the background isolate's copy
   of the key and plaintext, and the plaintext buffer are overwritten with
   zeros once sealing is done.
+- **Less timing exposure in the crypto.** GHASH's multiply and reduction
+  are branch-free (mask-based). On the web every asynchronous seal now uses
+  WebCrypto, not only batches over 8 KB. New
+  `SealedTraceConfig.aesGcmEncryptor` plugs in a platform AES-256-GCM on
+  native platforms; it must pass a known-answer self-test at `init` and
+  falls back to the built-in cipher per call if it fails.

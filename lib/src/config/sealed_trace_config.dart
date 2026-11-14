@@ -1,9 +1,25 @@
+import 'dart:typed_data';
+
 import '../model/environment.dart';
 import '../model/log_level.dart';
 import 'mask_config.dart';
 import 'network_log_config.dart';
 import 'retention_config.dart';
 import 'upload_config.dart';
+
+/// An AES-256-GCM encryption supplied by the app, typically from platform
+/// crypto (CommonCrypto, Conscrypt, Android Keystore) through a plugin.
+///
+/// It must encrypt [plaintext] under the 32-byte [key] and 12-byte [iv],
+/// authenticate [aad], and return the ciphertext (as long as the plaintext)
+/// and the 16-byte tag separately. See [SealedTraceConfig.aesGcmEncryptor].
+typedef AesGcmEncryptor =
+    Future<({Uint8List ciphertext, Uint8List tag})> Function(
+      Uint8List key,
+      Uint8List iv,
+      Uint8List plaintext,
+      Uint8List aad,
+    );
 
 /// Top-level configuration passed to `SealedTrace.init`.
 class SealedTraceConfig {
@@ -25,6 +41,7 @@ class SealedTraceConfig {
     this.databaseDirectory,
     this.sendUserDisplayName = false,
     this.allowInsecureHttp = false,
+    this.aesGcmEncryptor,
   });
 
   /// Server base URL. Uploads go to `{baseUrl}/api/v1/ingest/logs`.
@@ -93,6 +110,18 @@ class SealedTraceConfig {
   /// so the device deletes every pending log. Never enable it in production.
   final bool allowInsecureHttp;
 
+  /// An optional platform AES-256-GCM, used instead of the built-in pure-Dart
+  /// cipher, which uses lookup tables and is not constant-time.
+  ///
+  /// At `init` it must reproduce the built-in cipher's output on known-answer
+  /// cases; if it does not (or throws, or takes over 5 s) it is reported
+  /// through `SealedTrace.onException` and ignored. Once accepted it encrypts
+  /// every asynchronous seal. If a call fails or returns the wrong lengths,
+  /// that batch is encrypted by the built-in cipher instead and the failure
+  /// is reported, so no envelope is lost. The synchronous web page-exit seal
+  /// always uses the built-in cipher. Compared by identity.
+  final AesGcmEncryptor? aesGcmEncryptor;
+
   /// Returns a copy with the given fields replaced.
   SealedTraceConfig copyWith({
     String? baseUrl,
@@ -111,6 +140,7 @@ class SealedTraceConfig {
     String? databaseDirectory,
     bool? sendUserDisplayName,
     bool? allowInsecureHttp,
+    AesGcmEncryptor? aesGcmEncryptor,
   }) {
     return SealedTraceConfig(
       baseUrl: baseUrl ?? this.baseUrl,
@@ -129,6 +159,7 @@ class SealedTraceConfig {
       databaseDirectory: databaseDirectory ?? this.databaseDirectory,
       sendUserDisplayName: sendUserDisplayName ?? this.sendUserDisplayName,
       allowInsecureHttp: allowInsecureHttp ?? this.allowInsecureHttp,
+      aesGcmEncryptor: aesGcmEncryptor ?? this.aesGcmEncryptor,
     );
   }
 
@@ -150,7 +181,8 @@ class SealedTraceConfig {
       verboseInternalLogs == other.verboseInternalLogs &&
       databaseDirectory == other.databaseDirectory &&
       sendUserDisplayName == other.sendUserDisplayName &&
-      allowInsecureHttp == other.allowInsecureHttp;
+      allowInsecureHttp == other.allowInsecureHttp &&
+      identical(aesGcmEncryptor, other.aesGcmEncryptor);
 
   @override
   int get hashCode => Object.hash(
@@ -170,6 +202,7 @@ class SealedTraceConfig {
     databaseDirectory,
     sendUserDisplayName,
     allowInsecureHttp,
+    aesGcmEncryptor == null ? 0 : identityHashCode(aesGcmEncryptor),
   );
 
   // Deliberately omits apiKey so a config never leaks the key into logs.

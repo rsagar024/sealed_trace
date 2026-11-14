@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../config/config_validator.dart';
 import '../config/sealed_trace_config.dart';
 import '../crypto/aes_gcm_platform.dart';
+import '../crypto/app_aes_gcm.dart';
 import '../crypto/crypto_backend.dart';
 import '../crypto/envelope_sealer.dart';
 import '../crypto/public_key_parser.dart';
@@ -362,12 +363,32 @@ abstract final class SealedTrace {
           clock: overrides?.clock ?? const SystemClock(),
           newId: newId,
         );
+        var offload = platformAesGcmOffload();
+        var offloadThreshold = platformOffloadThresholdBytes;
+        final appCipher = clamped.aesGcmEncryptor;
+        if (appCipher != null && overrides?.cryptoBackend == null) {
+          if (await selfTestAesGcm(appCipher)) {
+            offload = appAesGcmOffload(appCipher, onError: _report);
+            offloadThreshold = 0;
+          } else {
+            _report(
+              StateError(
+                'aesGcmEncryptor failed its self-test; '
+                'using the built-in AES-GCM',
+              ),
+              StackTrace.current,
+            );
+          }
+        }
         final sealer = EnvelopeSealer(
           publicKey: publicKey,
           projectId: clamped.projectId,
           backend:
               overrides?.cryptoBackend ??
-              DefaultCryptoBackend(offload: platformAesGcmOffload()),
+              DefaultCryptoBackend(
+                offload: offload,
+                offloadThresholdBytes: offloadThreshold,
+              ),
           clock: overrides?.clock ?? const SystemClock(),
           newId: newId,
         );

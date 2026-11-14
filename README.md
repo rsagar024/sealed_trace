@@ -107,7 +107,7 @@ Nothing else needs importing.
 |---|---|---|---|---|
 | Android | SQLite (drift), WAL | background isolate above 8 KB | `paused` / `inactive` / `detached` flush the queue | ✅ emulator (Android 16, debug + release/R8), one phone ¹ |
 | iOS | SQLite (drift) | background isolate above 8 KB | `paused` / `inactive` flush the queue | ⏳ not run ² |
-| Web | IndexedDB + `localStorage` spill | WebCrypto above 8 KB (pure Dart if unavailable, and for the synchronous page-exit seal) | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ Chrome, Edge, Firefox (headless) ³ |
+| Web | IndexedDB + `localStorage` spill | WebCrypto for every asynchronous seal (pure Dart if unavailable, and for the synchronous page-exit seal) | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ Chrome, Edge, Firefox (headless) ³ |
 | Windows | SQLite (drift), WAL | background isolate above 8 KB | `detached` flushes; the 2 s write-behind covers the rest | 🧪 Dart VM only ⁴ |
 | macOS | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
 | Linux | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
@@ -238,6 +238,7 @@ Two rules to know up front:
 | `networkLogConfig` | `NetworkLogConfig()` | [Dio interceptor](#networklogconfig). |
 | `verboseInternalLogs` | `false` | Prints the SDK's own diagnostics with `debugPrint`. These never contain log content. |
 | `sendUserDisplayName` | `false` | `true` also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. Off by default, so no readable name leaves the device. `maskUserName` does not affect it. |
+| `aesGcmEncryptor` | `null` | Optional platform AES-256-GCM (for example CommonCrypto or Conscrypt through a plugin), used instead of the built-in pure-Dart cipher, which is table-based and not constant-time. It must reproduce the built-in output on known-answer cases at `init`, or it is reported through `onException` and ignored. A failing call falls back to the built-in cipher for that batch and is reported. |
 | `allowInsecureHttp` | `false` | Accepts an `http://` `baseUrl` in any `env`. Over plain HTTP the API key can be read and a network attacker can forge acknowledgements that delete pending logs. Never enable it in production. |
 | `databaseDirectory` | `null` | Where the SQLite file lives. Defaults to the application support directory. Pure-Dart apps must set it, or the SDK uses memory storage. |
 
@@ -353,7 +354,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 |---|---|
 | Levels | `verbose < debug < info < warning < error < fatal`. `fatal`, and `error` outside `prod`, are sealed at once; everything else waits in the write-behind queue. |
 | Write-behind queue | In memory, never on disk in plaintext. It is flushed after 2 s, at 25 events or at 64 KB, and when the app is paused, hidden or detached. |
-| Sealing | One queue batch becomes one envelope (one `batchId`). Plaintext JSON → AES-256-GCM (fresh key, 12-byte IV) → RSA-OAEP key wrap. Batches over 8 KB are encrypted in a background isolate on native platforms and with WebCrypto (`crypto.subtle`) on the web; the page-exit seal stays synchronous pure Dart. If sealing fails, the batch is dropped and counted, never stored in plaintext. |
+| Sealing | One queue batch becomes one envelope (one `batchId`). Plaintext JSON → AES-256-GCM (fresh key, 12-byte IV) → RSA-OAEP key wrap. Batches over 8 KB are encrypted in a background isolate on native platforms; on the web every asynchronous seal uses WebCrypto (`crypto.subtle`); an accepted `aesGcmEncryptor` encrypts every asynchronous seal; the page-exit seal stays synchronous pure Dart. If sealing fails, the batch is dropped and counted, never stored in plaintext. |
 | Storage | Only ciphertext and index columns are stored. `seq` keeps counting across restarts. A corrupt database is set aside and recreated; if storage can't be opened at all, the SDK falls back to memory and reports it. |
 | Upload triggers | Interval, size threshold, app resume, connectivity restored, `flush()`, and once at start. One cycle runs at a time. Offline cycles are skipped without using an attempt. |
 | Retries | Exponential backoff with jitter. After 5 failed attempts an envelope becomes a dead letter, retried once per app start and kept for 7 days. |
@@ -573,7 +574,10 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   the background isolate. Dart cannot wipe immutable copies (the JSON string, `BigInt` values, WebCrypto's key),
   and the garbage collector may have moved buffers, so a memory dump of a compromised device can still find them.
 - **The crypto has not been audited and is not constant-time.** Every envelope uses a fresh key once, and only the
-  public-key operation runs on the device, which limits the exposure but does not remove it.
+  public-key operation runs on the device, which limits the exposure but does not remove it. GHASH is branch-free,
+  but the pure-Dart AES uses lookup tables (cache timing) and Dart gives no constant-time guarantee. On the web every
+  asynchronous seal uses the browser's native WebCrypto; on native platforms, pass `aesGcmEncryptor` to use platform
+  crypto instead. RSA-OAEP uses `BigInt.modPow` on public values (the exponent and modulus).
 
 <a id="architecture"></a>
 

@@ -75,11 +75,15 @@ const RetentionPolicy _bigPolicy = RetentionPolicy(
   deadLetterTtl: Duration(days: 7),
 );
 
-// The production web backend: batches over 8 KB go through WebCrypto (M5).
+// The production web backend: every asynchronous seal goes through WebCrypto
+// (M5, L5).
 EnvelopeSealer _sealer() => EnvelopeSealer(
   publicKey: PublicKeyParser.parse(testPublicKeySpki),
   projectId: 'project-web',
-  backend: DefaultCryptoBackend(offload: platformAesGcmOffload()),
+  backend: DefaultCryptoBackend(
+    offload: platformAesGcmOffload(),
+    offloadThresholdBytes: platformOffloadThresholdBytes,
+  ),
 );
 
 LogRecord _record(int seq, {String message = 'event', Object? field}) =>
@@ -293,6 +297,10 @@ Future<void> _main() async {
   check(
     'sealing used WebCrypto with no pure-Dart fallback',
     webCryptoFallbacks == 0,
+  );
+  check(
+    'every async seal, small ones too, used WebCrypto (L5)',
+    webCryptoUses == cases.length,
   );
 
   // Masking a worst-case event on the caller's (main) thread.
