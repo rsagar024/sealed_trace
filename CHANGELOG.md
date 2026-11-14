@@ -149,6 +149,13 @@ First release.
   RSA-OAEP DB, masks and EM, the OAEP seed, the background isolate's copy
   of the key and plaintext, and the plaintext buffer are overwritten with
   zeros once sealing is done.
+- **Less metadata in the clear.** The plaintext is padded with spaces to a
+  Padmé size bucket (at least 256 bytes, at most about 12 % overhead), so the
+  ciphertext length no longer reveals the exact size. The stored index no
+  longer records sequence ranges, event times or levels (`seqMin`, `seqMax`,
+  `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
+  no longer shows whether a `fatal` occurred. The vectors and their spec are
+  updated.
 - **Less timing exposure in the crypto.** GHASH's multiply and reduction
   are branch-free (mask-based). On the web every asynchronous seal now uses
   WebCrypto, not only batches over 8 KB. New

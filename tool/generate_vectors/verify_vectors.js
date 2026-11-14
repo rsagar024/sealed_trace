@@ -72,6 +72,15 @@ function openEnvelope(e, key, aad) {
   ]).toString('utf8');
 }
 
+// Padme (Nikitin et al., PETS 2019), at least 256 bytes.
+function padme(length) {
+  if (length <= 256) return 256;
+  const e = Math.floor(Math.log2(length));
+  const s = Math.floor(Math.log2(e)) + 1;
+  const mask = 2 ** (e - s) - 1;
+  return Math.ceil(length / (mask + 1)) * (mask + 1);
+}
+
 function fails(fn) {
   try {
     fn();
@@ -108,7 +117,12 @@ for (const c of doc.envelopes) {
 
   try {
     const plain = openEnvelope(e, key, envelopeAad(e));
-    check(`${c.name}: decrypt`, plain === c.plaintextJson);
+    // L6: the JSON is followed by spaces up to its Padme length.
+    const json = Buffer.byteLength(c.plaintextJson, 'utf8');
+    check(`${c.name}: decrypt`, plain.slice(0, c.plaintextJson.length) === c.plaintextJson &&
+      /^ *$/.test(plain.slice(c.plaintextJson.length)));
+    check(`${c.name}: padded to the Padme length`,
+      Buffer.byteLength(plain, 'utf8') === padme(json) && padme(json) === c.paddedLength);
     check(`${c.name}: plaintext is a JSON array of ${e.eventCount}`,
       Array.isArray(JSON.parse(plain)) && JSON.parse(plain).length === e.eventCount);
   } catch (err) {

@@ -266,6 +266,27 @@ Future<void> _main() async {
     }
   }
 
+  // L6: Padme lengths under dart2js (32-bit bitwise operations) match a
+  // floating-point reference, so web and native pad identically.
+  {
+    var padOk = true;
+    for (var l = 1; l <= 200000 && padOk; l += (l < 70000 ? 1 : 97)) {
+      int reference(int length) {
+        if (length <= 256) return 256;
+        final e = (log(length) / ln2).floor();
+        final s = (log(e) / ln2).floor() + 1;
+        final step = pow(2, e - s).toInt();
+        return (length / step).ceil() * step;
+      }
+
+      if (padmeLength(l) != reference(l)) {
+        emit('TRACE padme $l: ${padmeLength(l)} != ${reference(l)}');
+        padOk = false;
+      }
+    }
+    check('Padme lengths match the reference under dart2js (L6)', padOk);
+  }
+
   // Sealing on the main thread. The queue caps a batch at 25 events and
   // 64 KB unless a single event is larger, so the largest real batches are
   // "25 events filling 64 KB" and "one event at the 128 K cap". The 25 x 128 K

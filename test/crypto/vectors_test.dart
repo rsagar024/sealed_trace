@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sealed_trace/src/crypto/envelope_sealer.dart';
 import 'package:sealed_trace/src/crypto/crypto_backend.dart';
 
 import '../helpers/envelope_opener.dart';
@@ -73,6 +74,15 @@ void main() {
         final key = unwrapKey(_b64(wire['wrappedKey'] as String));
         expect(base64.encode(key), c['aesKeyBase64']);
         expect(await openWire(wire), c['plaintextJson']);
+        // L6: the ciphertext is the padded plaintext's length.
+        expect(
+          base64.decode(wire['ciphertext'] as String).length,
+          c['paddedLength'],
+        );
+        expect(
+          padmeLength(utf8.encode(c['plaintextJson'] as String).length),
+          c['paddedLength'],
+        );
 
         final events = jsonDecode(c['plaintextJson'] as String) as List;
         expect(events, hasLength(wire['eventCount'] as int));

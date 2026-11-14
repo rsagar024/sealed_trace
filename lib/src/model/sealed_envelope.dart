@@ -59,9 +59,11 @@ String envelopeCreatedAt(DateTime createdAt) =>
 
 /// An encrypted batch of events plus the clear index data stored beside it.
 ///
-/// The index columns (`eventCount`, `seqMin`, `seqMax`, `minTs`, `maxTs`,
-/// `topLevels`, `payloadSize`) let retention and upload scheduling work
-/// without ever decrypting. They contain no message text.
+/// The index columns let retention and upload scheduling work without ever
+/// decrypting. They contain no message text. Since L6 the sealer leaves
+/// `seqMin`, `seqMax`, `minTs` and `maxTs` at 0 and `topLevels` empty, and
+/// `payloadSize` is the padded size, so the clear index reveals only the
+/// batch's time, event count and size bucket.
 class SealedEnvelope {
   /// Creates an envelope.
   const SealedEnvelope({

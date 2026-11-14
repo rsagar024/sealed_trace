@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:uuid/uuid.dart';
 
 import '../event/log_record.dart';
-import '../model/log_level.dart';
 import '../model/sealed_envelope.dart';
 import '../platform/clock.dart';
 import 'crypto_backend.dart';
@@ -13,7 +12,8 @@ import 'public_key_parser.dart';
 /// Seals a batch of events into an encrypted [SealedEnvelope].
 ///
 /// The plaintext is the UTF-8 JSON array of the records (compact, in the field
-/// order of `LogRecord.toJson`). A fresh 256-bit key and 96-bit IV encrypt it
+/// order of `LogRecord.toJson`), followed by ASCII spaces up to its
+/// [padmeLength], so its size is hidden within a bucket. A fresh 256-bit key and 96-bit IV encrypt it
 /// with AES-256-GCM, and the clear header (`alg`, `projectId`, `batchId`,
 /// `createdAt`, `eventCount`) is authenticated as additional data
 /// ([envelopeAad]), so it cannot be changed without breaking decryption. The
@@ -98,13 +98,19 @@ class EnvelopeSealer {
     if (records.isEmpty) {
       throw ArgumentError.value(records, 'records', 'Nothing to seal');
     }
-    return Uint8List.fromList(
-      utf8.encode(
-        jsonEncode(<Map<String, dynamic>>[
-          for (final record in records) record.toJson(),
-        ]),
-      ),
+    final json = utf8.encode(
+      jsonEncode(<Map<String, dynamic>>[
+        for (final record in records) record.toJson(),
+      ]),
     );
+    // Padded with ASCII spaces to a Padmé length (L6), so the ciphertext
+    // length reveals only a size bucket. Trailing whitespace is valid JSON.
+    final length = padmeLength(json.length);
+    final padded = Uint8List(length)
+      ..fillRange(0, length, 0x20)
+      ..setRange(0, json.length, json);
+    json.fillRange(0, json.length, 0);
+    return padded;
   }
 
   /// Fixes the clear header before encryption, so it can be authenticated.
@@ -143,21 +149,6 @@ class EnvelopeSealer {
       throw StateError('Crypto backend returned unexpected sizes');
     }
 
-    var seqMin = records.first.seq;
-    var seqMax = seqMin;
-    var minTs = records.first.timestamp.millisecondsSinceEpoch;
-    var maxTs = minTs;
-    final levels = <int>{};
-    for (final record in records) {
-      if (record.seq < seqMin) seqMin = record.seq;
-      if (record.seq > seqMax) seqMax = record.seq;
-      final ts = record.timestamp.millisecondsSinceEpoch;
-      if (ts < minTs) minTs = ts;
-      if (ts > maxTs) maxTs = ts;
-      levels.add(record.level.index);
-    }
-    final ordered = levels.toList()..sort();
-
     return SealedEnvelope(
       batchId: header.batchId,
       projectId: projectId,
@@ -167,11 +158,15 @@ class EnvelopeSealer {
       iv: iv,
       tag: encrypted.tag,
       ciphertext: encrypted.ciphertext,
-      seqMin: seqMin,
-      seqMax: seqMax,
-      minTs: minTs,
-      maxTs: maxTs,
-      topLevels: ordered.map((i) => LogLevel.values[i].name).join(','),
+      // L6: the clear index no longer records sequence numbers, event times
+      // or levels (whether a fatal occurred); nothing reads them, and they
+      // are all inside the ciphertext. Retention uses createdAt, eventCount
+      // and the stored size.
+      seqMin: 0,
+      seqMax: 0,
+      minTs: 0,
+      maxTs: 0,
+      topLevels: '',
       payloadSize: plaintext.length,
     );
   }
@@ -184,4 +179,21 @@ class _Header {
   final String batchId;
   final DateTime createdAt;
   final Uint8List aad;
+}
+
+/// Smallest padded plaintext, in bytes.
+const int minPaddedLength = 256;
+
+/// The Padmé length for a plaintext of [length] bytes (Nikitin et al.,
+/// "Reducing Metadata Leakage from Encrypted Files and Communication with
+/// PURBs", PETS 2019): [length] rounded up so that only O(log log L) bits of
+/// it are revealed, with at most about 12 % overhead. At least
+/// [minPaddedLength].
+int padmeLength(int length) {
+  if (length <= minPaddedLength) return minPaddedLength;
+  final e = length.bitLength - 1; // floor(log2 L)
+  final s = e.bitLength; // floor(log2 E) + 1
+  final lastBits = e - s;
+  final mask = (1 << lastBits) - 1;
+  return (length + mask) & ~mask;
 }

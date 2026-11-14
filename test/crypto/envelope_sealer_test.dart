@@ -76,14 +76,17 @@ void main() {
     expect(envelope.eventCount, 1);
   });
 
-  test('ciphertext has the same length as the plaintext', () async {
+  test('ciphertext has the length of the padded plaintext (L6)', () async {
     final records = [_record(seq: 1, message: 'héllo ✓')];
     final envelope = await _sealer().seal(records);
     expect(envelope.ciphertext.length, envelope.payloadSize);
     expect(
       envelope.payloadSize,
-      utf8.encode(_expectedPlaintext(records)).length,
+      padmeLength(utf8.encode(_expectedPlaintext(records)).length),
     );
+    final raw = await openEnvelopeRaw(envelope);
+    expect(raw.trimRight(), _expectedPlaintext(records));
+    expect(raw.substring(_expectedPlaintext(records).length).trim(), isEmpty);
   });
 
   test('wire JSON has exactly the section 7 keys and values', () async {
@@ -138,25 +141,22 @@ void main() {
       ),
     ];
     final envelope = await _sealer().seal(records);
+    // L6: the clear index keeps only the count; seq, times and levels are
+    // neutral, and the real values are only inside the ciphertext.
     expect(envelope.eventCount, 4);
-    expect(envelope.seqMin, 10);
-    expect(envelope.seqMax, 13);
-    expect(
-      envelope.minTs,
-      DateTime.utc(2026, 1, 1, 10, 0, 1).millisecondsSinceEpoch,
-    );
-    expect(
-      envelope.maxTs,
-      DateTime.utc(2026, 1, 1, 10, 0, 4).millisecondsSinceEpoch,
-    );
-    expect(envelope.topLevels, 'verbose,info,error');
+    expect([envelope.seqMin, envelope.seqMax], [0, 0]);
+    expect([envelope.minTs, envelope.maxTs], [0, 0]);
+    expect(envelope.topLevels, '');
+    expect(await sealedSeqs(envelope), [12, 10, 11, 13]);
   });
 
-  test('a single level gives a single entry', () async {
-    final envelope = await _sealer().seal([
+  test('a fatal event leaves no trace in the clear index (L6)', () async {
+    final fatal = await _sealer().seal([
       _record(seq: 1, level: LogLevel.fatal),
     ]);
-    expect(envelope.topLevels, 'fatal');
+    final info = await _sealer().seal([_record(seq: 1)]);
+    expect(fatal.topLevels, info.topLevels);
+    expect(fatal.payloadSize, info.payloadSize, reason: 'same size bucket');
   });
 
   test('an empty batch is rejected', () async {

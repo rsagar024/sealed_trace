@@ -71,7 +71,7 @@ Nothing else needs importing.
   wrapped with your project's RSA-2048 public key (RSA-OAEP, SHA-256).
 - 💾 **Offline, ciphertext only:**
   - storage is SQLite (drift) on Android, iOS and desktop, and IndexedDB in the browser;
-  - only the sealed envelope plus a few index columns (counts, sequence and time ranges, levels) are stored;
+  - only the sealed envelope plus a few index columns (creation time, event count, padded size) are stored;
   - retention limits the count, age and size.
 - 📡 **Reliable upload:**
   - the triggers are an interval, a size threshold, app resume, connectivity restored, and `flush()`;
@@ -540,7 +540,9 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 1. Masking runs on the caller's side before an event is queued, over the message, error, stack trace, metadata and
    your own context values.
 2. Every batch is encrypted with a fresh AES-256-GCM key, wrapped with the project's RSA-2048 public key.
-3. Only ciphertext and index columns (counts, sequence and time ranges, levels) are stored or sent.
+3. Only ciphertext and index columns (creation time, event count, padded size) are stored or sent. The plaintext is
+   padded to a size bucket, so the ciphertext length reveals only an approximate size; sequence numbers, event times
+   and levels (for example whether a `fatal` happened) stay inside the ciphertext.
 4. The device holds no private key. No API returns stored logs; `clearLocalLogs()` is the only local removal.
 5. The API key appears only in the `X-Api-Key` header, never in errors, logs or diagnostics.
 
@@ -662,7 +664,7 @@ sequenceDiagram
 
 | Item | Value |
 |---|---|
-| Plaintext | Compact JSON array of events, UTF-8. |
+| Plaintext | Compact JSON array of events, UTF-8, followed by ASCII spaces up to its Padmé length (at least 256 bytes, at most about 12 % more). Trailing whitespace is valid JSON; parse it as is or strip the spaces. The vectors file gives the formula and each case's `paddedLength`. |
 | AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, 16-byte tag stored separately. |
 | AAD | The clear header is authenticated. AAD = UTF-8 of six lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v2`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt` or `eventCount`, fails decryption. |
 | Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label; `wrappedKey` is 256 bytes. |

@@ -124,7 +124,6 @@ void main() {
         m['maxTs'] = 1;
       },
       'unknown level': (m) => m['topLevels'] = 'info,<script>',
-      'empty levels': (m) => m['topLevels'] = '',
       'odd batch id': (m) => m['batchId'] = '../../etc',
       'empty project': (m) => m['projectId'] = '',
       'old format v1': (m) => m['v'] = 1,

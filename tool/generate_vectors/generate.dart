@@ -109,6 +109,7 @@ Future<Map<String, dynamic>> _envelopeCase(
     'description': description,
     'aesKeyBase64': _b64(key),
     'plaintextJson': jsonEncode([for (final r in records) r.toJson()]),
+    'paddedLength': envelope.payloadSize,
     'envelope': envelope.toWireJson(),
     'aadUtf8': utf8.decode(envelope.aad),
     'index': <String, dynamic>{
@@ -303,7 +304,16 @@ Future<void> main() async {
       'plaintext':
           'UTF-8 bytes of the compact JSON array of LogEvent objects (no spaces, '
           'keys in the order id, seq, ts, level, tag, message, error, stackTrace, '
-          'metadata, sessionId, userId, ctx; non-ASCII characters are not escaped).',
+          'metadata, sessionId, userId, ctx; non-ASCII characters are not escaped), '
+          'followed by ASCII spaces (0x20) up to the Padme length of its size '
+          '(see "padding"). Trailing whitespace is valid JSON, so parse the '
+          'decrypted bytes as they are or strip the spaces first.',
+      'padding':
+          'paddedLength is 256 if L <= 256; otherwise, with '
+          'E = floor(log2 L), S = floor(log2 E) + 1, '
+          'mask = 2^(E - S) - 1, paddedLength = (L + mask) & ~mask '
+          '(Nikitin et al., PETS 2019). L is the JSON length in bytes. Each '
+          'case lists plaintextJson (unpadded) and paddedLength.',
       'aes':
           'AES-256-GCM, 32-byte random key, 12-byte random IV, 16-byte tag '
           'stored separately from the ciphertext. Envelopes authenticate the '

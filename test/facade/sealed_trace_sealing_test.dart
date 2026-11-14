@@ -140,9 +140,8 @@ void main() {
       final envelope = envelopes.single;
       expect(envelope.projectId, 'proj-1');
       expect(envelope.eventCount, 2);
-      expect(envelope.seqMin, 1);
-      expect(envelope.seqMax, 2);
-      expect(envelope.topLevels, 'info,error');
+      expect(await sealedSeqs(envelope), [1, 2]);
+      expect(envelope.topLevels, '', reason: 'levels stay encrypted (L6)');
 
       final plaintext = await openEnvelope(envelope);
       final events = jsonDecode(plaintext) as List;

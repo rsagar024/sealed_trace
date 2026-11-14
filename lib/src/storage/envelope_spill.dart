@@ -113,8 +113,8 @@ void _checkSpilled(SealedEnvelope e) {
       e.payloadSize != e.ciphertext.length ||
       e.seqMin > e.seqMax ||
       e.minTs > e.maxTs ||
-      e.topLevels.isEmpty ||
-      !e.topLevels.split(',').every(_levelNames.contains)) {
+      (e.topLevels.isNotEmpty &&
+          !e.topLevels.split(',').every(_levelNames.contains))) {
     throw const FormatException('Inconsistent spilled envelope');
   }
 }

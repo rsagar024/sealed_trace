@@ -283,6 +283,12 @@ async function runPhase(browser, base, query, { waitDone = true, timeout = 18000
   }
 }
 
+function stripPadding(buffer) {
+  let end = buffer.length;
+  while (end > 0 && buffer[end - 1] === 0x20) end--;
+  return buffer.subarray(0, end);
+}
+
 function decrypt(wire) {
   const key = crypto.privateDecrypt(
     { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
@@ -336,7 +342,8 @@ function checkMain(lines) {
     try {
       const plain = decrypt(e.wire);
       ok =
-        crypto.createHash('sha256').update(plain).digest('base64') === e.plainHash &&
+        // L6: strip the trailing padding spaces before comparing.
+        crypto.createHash('sha256').update(stripPadding(plain)).digest('base64') === e.plainHash &&
         e.wire.v === 2 &&
         e.wire.alg === 'RSA-OAEP-2048-SHA256+AES-256-GCM';
     } catch (err) {
