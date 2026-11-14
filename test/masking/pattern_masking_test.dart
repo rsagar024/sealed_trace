@@ -113,7 +113,7 @@ void main() {
       _untouched('45.0000, 181.0000'); // longitude out of range
       _untouched('1.5, 2.5');
       _untouched('1.2.3');
-      _untouched('192.168.1.1');
+      _untouched('1.2.3.4.5');
     });
   });
 
@@ -221,6 +221,139 @@ void main() {
     test('ordinary words are left alone', () {
       _untouched('Bearer of bad news');
       _untouched('eyJ alone is not a token');
+    });
+  });
+
+  group('M4: more default patterns', () {
+    test('API keys with a known prefix', () {
+      _masked('AKIAIOSFODNN7EXAMPLE');
+      _masked(
+        'key sk_'
+        'live_'
+        'FAKEfake0000FAKEfake0000 here',
+        expected: 'key *** here',
+      );
+      _masked(
+        'rk_'
+        'test_'
+        'FAKEfake0000FAKEfake',
+      );
+      _masked('ghp_${'a' * 36}');
+      _masked('github_pat_${'B' * 22}');
+      _masked('AIza${'x' * 35}');
+      _masked(
+        'xox'
+        'b-'
+        'FAKEfake00-FAKEfake',
+      );
+      _masked('glpat-${'z' * 20}');
+    });
+
+    test('publishable keys and look-alikes are kept', () {
+      _untouched(
+        'pk_'
+        'live_'
+        'FAKEfake0000FAKEfake0000',
+      );
+      _untouched('AKIA is a prefix');
+      _untouched('sk_live_short');
+    });
+
+    test('IBANs that pass mod-97', () {
+      _masked('DE89370400440532013000');
+      _masked(
+        'pay to DE89 3704 0044 0532 0130 00 today',
+        expected: 'pay to *** today',
+      );
+      _masked('GB82WEST12345698765432');
+      _untouched('DE00370400440532013000'); // bad check digits
+    });
+
+    test('dashed US SSNs in the valid ranges', () {
+      _masked('ssn 123-45-6789', expected: 'ssn ***');
+      _untouched('000-12-3456');
+      _untouched('666-12-3456');
+      _untouched('912-34-5678');
+      _untouched('123-00-4567');
+      _untouched('2026-01-15'); // a date
+    });
+
+    test('Aadhaar numbers that pass Verhoeff', () {
+      _masked('234567890124');
+      _masked('aadhaar 2345 6789 0124 ok', expected: 'aadhaar *** ok');
+      _masked('2345-6789-0124');
+      _untouched('234567890129'); // checksum fails
+    });
+
+    test('Indian PAN', () {
+      _masked('pan ABCPE1234F', expected: 'pan ***');
+      _untouched('ABCXE1234F'); // X is not a holder type
+      _untouched('abcpe1234f');
+    });
+
+    test('IPv4 addresses', () {
+      _masked('from 192.168.1.1 now', expected: 'from *** now');
+      _masked('host 10.0.0.1.', expected: 'host ***.');
+      _untouched('999.1.1.1');
+      _untouched('1.2.3');
+      _untouched('1.2.3.4.5');
+    });
+
+    test('IPv6 addresses', () {
+      _masked('2001:db8::1');
+      _masked('peer fe80::1ff:fe23:4567:890a up', expected: 'peer *** up');
+      _masked('::1');
+      _masked('2001:0db8:85a3:0000:0000:8a2e:0370:7334');
+      _untouched('at 10:30:45');
+      _untouched('std::vector');
+      _untouched('a :: b');
+    });
+
+    test('masking stays idempotent', () {
+      const text =
+          'AKIAIOSFODNN7EXAMPLE DE89370400440532013000 123-45-6789 '
+          '234567890124 ABCPE1234F 192.168.1.1 2001:db8::1 password=x';
+      final once = _engine.maskString(text);
+      expect(_engine.maskString(once), once);
+    });
+  });
+
+  group('M4: credentials in free text (every string)', () {
+    test('key=value and key: value in log messages', () {
+      expect(
+        _engine.maskString('retry with password=hunter2 and otp: 123456'),
+        'retry with password=*** and otp: ***',
+      );
+      expect(
+        _engine.maskString('GET /cb?code=1&access_token=abc failed'),
+        'GET /cb?code=1&access_token=*** failed',
+      );
+    });
+
+    test('JSON and XML fragments in log messages', () {
+      expect(
+        _engine.maskString('body {"clientSecret":"s3cr3t","ok":true}'),
+        'body {"clientSecret":"***","ok":true}',
+      );
+      expect(
+        _engine.maskString('<apiKey>k-1</apiKey><city>Pune</city>'),
+        '<apiKey>***</apiKey><city>Pune</city>',
+      );
+    });
+
+    test('Cookie lines in log messages', () {
+      expect(_engine.maskString('Cookie: sid=abc; theme=dark'), 'Cookie: ***');
+    });
+
+    test('ordinary text with colons and equals signs is kept', () {
+      _untouched('status: ok, retries=3, at 10:30');
+      _untouched('a == b');
+    });
+
+    test('useDefaultKeys: false still masks denylisted header names', () {
+      final engine = MaskingEngine(const MaskConfig(useDefaultKeys: false));
+      expect(engine.maskString('password=x'), 'password=x');
+      expect(engine.maskString('x-api-key: k1'), 'x-api-key: ***');
     });
   });
 }

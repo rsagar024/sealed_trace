@@ -250,9 +250,10 @@ Two rules to know up front:
 | `extraKeys` | `[]` | More keys whose values are replaced. Matching is on the whole key, ignoring case and the separators `_`, `-`, `.` and spaces, so `national_id` also matches `nationalId`. |
 | `extraPatterns` | `[]` | More `RegExp`s applied to every string. |
 | `extraHeaderDenylist` | `[]` | More header names to mask in network logs. |
-| `useDefaultKeys` | `true` | Exact keys (separators and case ignored): `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv`, `username`, `otp`, `pin`, `mpin`, `cvc`, `session`, `sessionId`, `sid`, `cardNumber`, `ccNumber`, `client_secret`, `authCode`. Plus any key that **contains** `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `apikey`, `privatekey`, `authorization`, `cookie` or `jwt` (`idToken`, `x-csrf-token`, `oldPassword`), or **ends with** `auth` (`oauth`, `basicAuth`; not `author`). |
-| `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens anywhere in a string (messages, JSON values, URLs); email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. |
+| `useDefaultKeys` | `true` | Exact keys (separators and case ignored): `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv`, `username`, `otp`, `pin`, `mpin`, `cvc`, `session`, `sessionId`, `sid`, `cardNumber`, `ccNumber`, `client_secret`, `authCode`, `iban`, `passport`, `passportNumber`, `passportNo`, `aadhaar`, `aadhar`, `aadhaarNumber`, `panNumber`, `panCard`, `nationalId`, `taxId`, `ip`, `ipAddress`, `clientIp`. Plus any key that **contains** `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `apikey`, `privatekey`, `authorization`, `cookie` or `jwt` (`idToken`, `x-csrf-token`, `oldPassword`), or **ends with** `auth` (`oauth`, `basicAuth`; not `author`). |
+| `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens; API keys with a known prefix (AWS `AKIA…`, Stripe `sk_`/`rk_live_…`, GitHub `ghp_…`/`github_pat_…`, Google `AIza…`, Slack `xox…-`, GitLab `glpat-`); IBANs (mod-97 checked); dashed US SSNs; Aadhaar numbers (Verhoeff checked); Indian PAN; IPv4 and IPv6 addresses; email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. All apply to every string and to map keys. |
 | `replacement` | `'***'` | Replacement text. |
+| `maskUrlPathSegments` | `false` | `true` replaces URL path segments that are not plain words in network logs: `/reset/9f8a2c` → `/reset/***`, `/users/asha.rao` → `/users/***`. Words, `-`, `_` and `v2`-style versions are kept. |
 | `maskUserName` | `true` | Sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. `false` sends the name as given so the console's log list and detail can show it. |
 
 The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
@@ -542,11 +543,17 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 - **Masking is defense in depth, not a guarantee.** Known gaps:
   - US numbers written as 10 bare digits or with dots are not recognised.
   - Free-text addresses and names inside text are not recognised.
-  - Secrets with no recognisable key or scheme are not detected.
+  - Secrets with no recognisable key, prefix or scheme are not detected; passport numbers are masked only under a
+    passport key, because their formats vary too much to match safely.
+  - Credentials written as `key=value`, `key: value`, `"key": value` or `<key>value</key>` are masked in every
+    string, log messages included, so a message like `auth: failed` becomes `auth: ***`.
+  - Four-part version strings such as `1.2.3.4` look like IPv4 addresses and are masked. A 12-digit number that
+    passes the Verhoeff check is masked as an Aadhaar number (about 1 in 10 random ones).
+  - URL path segments are kept unless `maskUrlPathSegments` is on.
   - A 10-digit number starting with 6–9 is treated as an Indian phone number and masked.
   - A long numeric id that happens to pass the Luhn check is masked as a card.
-- **Keys that match no default key or fragment are not masked in your own `meta`**, for example `iban` or
-  `nationalId`. Add such keys with `extraKeys` or `addMaskKeys`. JWTs and `Bearer` tokens are masked in every
+- **Keys that match no default key or fragment are not masked in your own `meta`**, for example `memberNo` or
+  `loyaltyId`. Add such keys with `extraKeys` or `addMaskKeys`. JWTs and `Bearer` tokens are masked in every
   string whatever the key.
 - **Fragment matching can over-mask**: `passwordHint` or `tokenCount` are masked too.
 - **`userId`, `tag` and the device context are never masked.** Don't put personal data in them. A name passed to

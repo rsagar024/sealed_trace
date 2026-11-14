@@ -128,12 +128,12 @@ void main() {
 
   test('addMaskKeys applies to later events only', () async {
     await _init();
-    SealedTrace.i('t', 'before', meta: {'iban': 'GB00'});
-    SealedTrace.addMaskKeys(['IBAN']);
-    SealedTrace.i('t', 'after', meta: {'iban': 'GB00'});
+    SealedTrace.i('t', 'before', meta: {'memberNo': 'M-77'});
+    SealedTrace.addMaskKeys(['MEMBER_NO']);
+    SealedTrace.i('t', 'after', meta: {'memberNo': 'M-77'});
     await SealedTrace.flush();
-    expect(sink.records[0].metadata, {'iban': 'GB00'});
-    expect(sink.records[1].metadata, {'iban': '***'});
+    expect(sink.records[0].metadata, {'memberNo': 'M-77'});
+    expect(sink.records[1].metadata, {'memberNo': '***'});
   });
 
   test('addMaskPattern applies to later events', () async {

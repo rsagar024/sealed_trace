@@ -37,6 +37,20 @@ const List<String> defaultSensitiveKeys = <String>[
   'ccNumber',
   'client_secret',
   'authCode',
+  'iban',
+  'passport',
+  'passportNumber',
+  'passportNo',
+  'aadhaar',
+  'aadhar',
+  'aadhaarNumber',
+  'panNumber',
+  'panCard',
+  'nationalId',
+  'taxId',
+  'ip',
+  'ipAddress',
+  'clientIp',
 ];
 
 /// Fragments that make a key sensitive wherever they appear in it, after the

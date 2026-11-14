@@ -105,7 +105,7 @@ class BodySanitizer {
     if (contentType != null && contentType.contains('x-www-form-urlencoded')) {
       return _truncate(engine.maskQueryString(text));
     }
-    return _truncate(_credentialPass(engine.maskString(text)));
+    return _truncate(_schemePass(engine.maskString(text)));
   }
 
   String _sanitizeStructure(Object data) {
@@ -158,72 +158,18 @@ class BodySanitizer {
 
   // ---- credentials in free text ----
 
-  static const Set<String> _schemeWords = <String>{
-    'bearer',
-    'basic',
-    'digest',
-    'negotiate',
-    'ntlm',
-  };
-
   static final RegExp _scheme = RegExp(
     r'\b(Bearer|Basic|Digest|Negotiate|NTLM)(\s+)[A-Za-z0-9._~+/=\-]{6,2000}',
     caseSensitive: false,
   );
 
-  // A cookie line holds several pairs, so everything after the colon goes.
-  static final RegExp _cookieLine = RegExp(
-    r'(\b(?:cookie|set-cookie)\s*:\s*)[^\r\n]{1,2000}',
-    caseSensitive: false,
+  /// Masks scheme tokens such as `Basic abc` in text bodies. Key-value pairs
+  /// (`token=...`, `"password": ...`, `<idToken>...`) are already masked by
+  /// `MaskingEngine.maskString`, which applies them to every string. `Basic`
+  /// and the other schemes are matched here only, not in log messages, where
+  /// "Basic setup" is ordinary text.
+  String _schemePass(String text) => text.replaceAllMapped(
+    _scheme,
+    (m) => '${m[1]}${m[2]}${engine.replacement}',
   );
-
-  // The key-value forms capture the key name; the engine decides whether it
-  // is sensitive, so text bodies follow exactly the same rules as JSON.
-
-  // "key": value
-  static final RegExp _jsonPair = RegExp(
-    r'("([^"\\\r\n]{1,64})"\s*:\s*)("(?:[^"\\]|\\.){0,2000}"|[^\s,}\]]{1,500})',
-  );
-
-  // <key attr>value</key>
-  static final RegExp _xmlPair = RegExp(
-    r'(<([A-Za-z_][A-Za-z0-9_.:\-]{0,63})(?:\s[^>]{0,200})?>)([^<]{0,2000})'
-    r'(</\2>)',
-    caseSensitive: false,
-  );
-
-  // key=value, key: value, key = "value"
-  static final RegExp _plainPair = RegExp(
-    r'''(\b([A-Za-z_][A-Za-z0-9_.\-]{0,63})["']?\s{0,5}[=:]\s{0,5}["']?)'''
-    r'''([^\s&,;"'<>{}\[\]]{1,500})''',
-  );
-
-  bool _sensitive(String key) => engine.isSensitiveHeader(key);
-
-  /// Masks credentials that the pattern pass cannot see: scheme tokens such as
-  /// `Basic abc`, and `key=value`, `key: value`, `"key": "value"` and
-  /// `<key>value</key>` forms for every sensitive key or header name.
-  String _credentialPass(String text) {
-    var out = text.replaceAllMapped(_scheme, (m) => '${m[1]}${m[2]}***');
-    out = out.replaceAllMapped(_cookieLine, (m) => '${m[1]}***');
-    out = out.replaceAllMapped(_jsonPair, (m) {
-      if (!_sensitive(m[2]!)) return m[0]!;
-      return '${m[1]}"${engine.replacement}"';
-    });
-    out = out.replaceAllMapped(_xmlPair, (m) {
-      if (!_sensitive(m[2]!)) return m[0]!;
-      return '${m[1]}${engine.replacement}${m[4]}';
-    });
-    return _plainPass(out);
-  }
-
-  String _plainPass(String text) => text.replaceAllMapped(_plainPair, (m) {
-    final value = m[3]!;
-    // A harmless key must not hide a pair in its value: `note:password=x`.
-    if (!_sensitive(m[2]!)) return '${m[1]}${_plainPass(value)}';
-    // "Authorization: Bearer ***": keep the scheme word, the scheme pass
-    // already masked the token after it.
-    if (_schemeWords.contains(value.toLowerCase())) return m[0]!;
-    return '${m[1]}${engine.replacement}';
-  });
 }

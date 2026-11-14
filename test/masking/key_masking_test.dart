@@ -14,7 +14,9 @@ void main() {
       'name', 'first_name', 'last_name', 'fName', 'lName', 'email', 'phone',
       'dob', 'ssn', 'cvv', 'username', 'otp', 'pin', 'mpin', 'cvc', 'session',
       'sessionId', 'sid', 'cardNumber', 'ccNumber', 'client_secret',
-      'authCode', //
+      'authCode', 'iban', 'passport', 'passportNumber', 'passportNo', 'aadhaar',
+      'aadhar', 'aadhaarNumber', 'panNumber', 'panCard', 'nationalId', 'taxId',
+      'ip', 'ipAddress', 'clientIp', //
     ]);
   });
 
@@ -66,7 +68,7 @@ void main() {
   test('near-miss keys are not masked', () {
     final out = _engine().maskMap({
       'filename': 'f.txt',
-      'passport': 'P1',
+      'compass': 'N',
       'names': 'n',
       'author': 'a',
       'authority': 'b',
@@ -76,7 +78,7 @@ void main() {
     });
     expect(out, {
       'filename': 'f.txt',
-      'passport': 'P1',
+      'compass': 'N',
       'names': 'n',
       'author': 'a',
       'authority': 'b',
@@ -112,9 +114,9 @@ void main() {
 
   test('addKeys takes effect for later calls only', () {
     final engine = _engine();
-    expect(engine.maskMap({'iban': 'X'}), {'iban': 'X'});
-    engine.addKeys(['IBAN']);
-    expect(engine.maskMap({'iban': 'X'}), {'iban': '***'});
+    expect(engine.maskMap({'memberNo': 'X'}), {'memberNo': 'X'});
+    engine.addKeys(['MEMBER_NO']);
+    expect(engine.maskMap({'memberNo': 'X'}), {'memberNo': '***'});
   });
 
   test('the replacement text is configurable', () {
@@ -248,6 +250,53 @@ void main() {
         'expires_in': 3600,
         'scope': 'openid',
       });
+    });
+  });
+
+  group('M4: PII in map keys', () {
+    test('a key holding PII is masked, its value is kept', () {
+      final out = _engine().maskMap({
+        'asha@example.com': {'orders': 3},
+        'city': 'Pune',
+      });
+      expect(out, {
+        '***': {'orders': 3},
+        'city': 'Pune',
+      });
+    });
+
+    test('keys that mask to the same text stay distinct', () {
+      final out = _engine().maskMap({
+        'a@example.com': 1,
+        'b@example.com': 2,
+        'c@example.com': 3,
+      });
+      expect(out, {'***': 1, '***#2': 2, '***#3': 3});
+    });
+
+    test('nested maps and context keys too', () {
+      final out = _engine().maskMap({
+        'byIp': {'192.168.1.1': 'blocked'},
+      });
+      expect(out, {
+        'byIp': {'***': 'blocked'},
+      });
+    });
+
+    test('new identity keys are masked', () {
+      for (final key in [
+        'iban',
+        'passport',
+        'passport_number',
+        'aadhaar',
+        'pan_number',
+        'national_id',
+        'tax-id',
+        'ipAddress',
+        'client_ip',
+      ]) {
+        expect(_engine().isSensitiveKey(key), isTrue, reason: key);
+      }
     });
   });
 }

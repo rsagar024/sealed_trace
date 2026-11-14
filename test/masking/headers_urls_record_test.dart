@@ -303,4 +303,37 @@ void main() {
       );
     });
   });
+
+  group('M4: URL path segments (opt-in)', () {
+    test('off by default: path ids are kept', () {
+      expect(
+        _engine().maskUrl('https://a.com/reset/9f8a2c/confirm'),
+        'https://a.com/reset/9f8a2c/confirm',
+      );
+    });
+
+    test('maskUrlPathSegments masks every segment that is not a word', () {
+      final engine = _engine(const MaskConfig(maskUrlPathSegments: true));
+      expect(
+        engine.maskUrl('https://a.com/reset/9f8a2c/confirm?x=1'),
+        'https://a.com/reset/***/confirm?x=1',
+      );
+      expect(
+        engine.maskUrl('https://a.com/users/asha.rao/orders'),
+        'https://a.com/users/***/orders',
+      );
+      expect(
+        engine.maskUrl('https://a.com/api/v2/order-items/'),
+        'https://a.com/api/v2/order-items/',
+      );
+      expect(engine.maskUrl('/u/12345'), '/u/***');
+    });
+
+    test('the field takes part in copyWith and equality', () {
+      const on = MaskConfig(maskUrlPathSegments: true);
+      expect(const MaskConfig().maskUrlPathSegments, isFalse);
+      expect(const MaskConfig().copyWith(maskUrlPathSegments: true), on);
+      expect(on, isNot(const MaskConfig()));
+    });
+  });
 }

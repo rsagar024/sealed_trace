@@ -5,6 +5,7 @@ import '../event/event_builder.dart';
 import '../event/log_record.dart';
 import 'default_keys.dart';
 import 'default_patterns.dart';
+import 'credential_pass.dart';
 import 'header_redactor.dart';
 import 'url_redactor.dart';
 
@@ -24,7 +25,12 @@ class MaskingEngine {
   }) : replacement = config.replacement,
        _maskUserName = config.maskUserName,
        _useDefaultKeys = config.useDefaultKeys,
+       _maskUrlPathSegments = config.maskUrlPathSegments,
        _onError = onError {
+    _credentials = CredentialPass(
+      isSensitive: isSensitiveHeader,
+      replacement: replacement,
+    );
     if (config.useDefaultKeys) {
       _keys.addAll(defaultSensitiveKeys.map(_normalize));
       _fragments.addAll(defaultSensitiveKeyFragments.map(_normalize));
@@ -47,6 +53,8 @@ class MaskingEngine {
   final bool _maskUserName;
   final void Function(Object error, StackTrace stack)? _onError;
   final bool _useDefaultKeys;
+  final bool _maskUrlPathSegments;
+  late final CredentialPass _credentials;
   final Set<String> _keys = <String>{};
   final List<String> _fragments = <String>[];
   final Set<String> _headerDenylist = <String>{};
@@ -113,7 +121,8 @@ class MaskingEngine {
   bool isSensitiveHeader(String name) =>
       _headerDenylist.contains(_headerName(name)) || isSensitiveKey(name);
 
-  /// Masks PII patterns in [input].
+  /// Masks PII patterns in [input], then credentials written as key-value
+  /// text (`token=...`, `password: ...`, `"secret": ...`).
   String maskString(String input) {
     if (input.isEmpty) return input;
 
@@ -148,6 +157,12 @@ class MaskingEngine {
         _report(error, stack);
         return replacement;
       }
+    }
+    try {
+      body = _credentials.apply(body);
+    } catch (error, stack) {
+      _report(error, stack);
+      return replacement;
     }
     return dropped ? '$body$tailMarker' : body;
   }
@@ -187,6 +202,7 @@ class MaskingEngine {
     isSensitiveKey: isSensitiveKey,
     maskString: maskString,
     replacement: replacement,
+    maskPathSegments: _maskUrlPathSegments,
   );
 
   /// Masks every free-text part of [record].
@@ -209,9 +225,9 @@ class MaskingEngine {
       } else if (key == userDisplayNameKey || coreContextKeys.contains(key)) {
         ctx[key] = entry.value;
       } else if (isSensitiveKey(key) && entry.value != null) {
-        ctx[key] = replacement;
+        _put(ctx, key, replacement);
       } else {
-        ctx[key] = _value(entry.value, 1, seen);
+        _put(ctx, key, _value(entry.value, 1, seen));
       }
     }
     final error = record.error;
@@ -249,13 +265,28 @@ class MaskingEngine {
       final key = entry.key.toString();
       final value = entry.value;
       if (value != null && isSensitiveKey(key)) {
-        out[key] = replacement;
+        _put(out, key, replacement);
       } else {
-        out[key] = _value(value, depth + 1, path);
+        _put(out, key, _value(value, depth + 1, path));
       }
     }
     path.remove(map);
     return out;
+  }
+
+  /// Stores [value] under [key] with PII in the key itself masked, such as a
+  /// map keyed by email. Keys that mask to the same text stay distinct.
+  void _put(Map<String, dynamic> out, String key, Object? value) {
+    final masked = maskString(key);
+    if (masked == key) {
+      out[key] = value;
+      return;
+    }
+    var unique = masked;
+    for (var n = 2; out.containsKey(unique); n++) {
+      unique = '$masked#$n';
+    }
+    out[unique] = value;
   }
 
   List<dynamic> _list(Iterable<dynamic> items, int depth, Set<Object> path) {

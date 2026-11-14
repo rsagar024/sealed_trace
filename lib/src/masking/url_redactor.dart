@@ -9,6 +9,7 @@ String redactUrl(
   required bool Function(String key) isSensitiveKey,
   required String Function(String value) maskString,
   required String replacement,
+  bool maskPathSegments = false,
 }) {
   final uri = Uri.tryParse(url);
   if (uri == null) return maskString(url);
@@ -21,7 +22,11 @@ String redactUrl(
     out.write(uri.host.contains(':') ? '[${uri.host}]' : uri.host);
     if (uri.hasPort) out.write(':${uri.port}');
   }
-  out.write(maskString(uri.path));
+  out.write(
+    maskPathSegments
+        ? _redactPath(uri.path, replacement)
+        : maskString(uri.path),
+  );
   if (uri.hasQuery) {
     out
       ..write('?')
@@ -81,6 +86,18 @@ String _redactQuery(
   }
   return parts.join('&');
 }
+
+// Segments kept by `maskPathSegments`: plain words and version markers.
+final RegExp _plainSegment = RegExp(r'^(?:[A-Za-z_\-]{1,32}|v\d{1,3})$');
+
+String _redactPath(String path, String replacement) => path
+    .split('/')
+    .map(
+      (segment) => segment.isEmpty || _plainSegment.hasMatch(segment)
+          ? segment
+          : replacement,
+    )
+    .join('/');
 
 String _decode(String value) {
   try {

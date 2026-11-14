@@ -28,9 +28,14 @@ First release.
   - Sensitive keys are replaced: a default list plus your own keys, matched
     ignoring case and `_`, `-`, `.`, plus any key containing a credential
     fragment such as `token`, `secret` or `password`, or ending with `auth`.
-  - Patterns are replaced: JWTs, `Bearer` tokens, email, card numbers (Luhn
-    or card grouping), coordinates, Indian and US phone numbers, plus your own
-    patterns.
+  - Patterns are replaced in every string and in map keys: JWTs, `Bearer`
+    tokens, prefixed API keys (AWS, Stripe, GitHub, Google, Slack, GitLab),
+    IBANs, US SSNs, Aadhaar and PAN numbers, IPv4 and IPv6 addresses, email,
+    card numbers (Luhn or card grouping), coordinates, Indian and US phone
+    numbers, plus your own patterns.
+  - `key=value`, `key: value`, JSON and XML credential pairs are masked in
+    every string, log messages included.
+  - `MaskConfig(maskUrlPathSegments: true)` masks ids and tokens in URL paths.
   - Header denylist (14 credential headers, plus any header named like a
     sensitive key), URL query and userinfo redaction.
   - String length cap; idempotent; fails closed.
@@ -102,3 +107,9 @@ First release.
   so a name passed to `setUser` is not sent readable unless the app opts in
   (privacy by default, GDPR Art. 25). The dartdoc that said `ctx.userName`
   "stays masked" under the old defaults is corrected.
+- **Wider PII and secret detection.** New default patterns for API keys,
+  IBAN, SSN, Aadhaar, PAN and IP addresses, each validated (mod-97, Verhoeff,
+  SSN ranges, IPv6 parsing) to keep false positives low. The credential pass
+  now covers log messages, not only network bodies, and map keys holding PII
+  (for example a map keyed by email) are masked. Identity keys such as
+  `iban`, `passport`, `aadhaar` and `nationalId` are masked by default.
