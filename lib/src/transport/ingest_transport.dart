@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -7,7 +8,9 @@ import '../config/upload_config.dart' show AttestationTokenProvider;
 import '../model/sealed_envelope.dart';
 import '../platform/clock.dart';
 import 'ingest_response.dart';
+import 'pinned_adapter.dart';
 import 'retry_after.dart';
+import 'spki_pin.dart';
 
 /// Sends sealed envelopes to the server.
 abstract interface class IngestClient {
@@ -33,6 +36,7 @@ class IngestTransport implements IngestClient {
     HttpClientAdapter? adapter,
     this.clock = const SystemClock(),
     AttestationTokenProvider? attestationTokenProvider,
+    List<String> pinnedSpkiSha256 = const [],
   }) : uri = ingestUri(baseUrl),
        _apiKey = apiKey,
        _attestation = attestationTokenProvider,
@@ -41,12 +45,28 @@ class IngestTransport implements IngestClient {
            connectTimeout: timeout,
            sendTimeout: timeout,
            receiveTimeout: timeout,
-           responseType: ResponseType.plain,
+           // Read as a stream so the body can be capped (maxResponseBytes).
+           responseType: ResponseType.stream,
            validateStatus: (_) => true,
+           // A redirect could carry the API key and envelopes elsewhere, and
+           // its target's 202 would be trusted. Never follow one.
+           followRedirects: false,
+           maxRedirects: 0,
          ),
        ) {
-    if (adapter != null) _dio.httpClientAdapter = adapter;
+    if (adapter != null) {
+      _dio.httpClientAdapter = adapter;
+    } else if (pinnedSpkiSha256.isNotEmpty) {
+      final pinned = createPinnedAdapter(
+        pinnedSpkiSha256.map(SpkiPin.normalize).toSet(),
+      );
+      if (pinned != null) _dio.httpClientAdapter = pinned;
+    }
   }
+
+  /// Longest response body read. Real ingest answers are a few kilobytes;
+  /// anything longer is not read further and the request counts as failed.
+  static const int maxResponseBytes = 256 * 1024;
 
   /// The full ingest URL.
   final Uri uri;
@@ -106,22 +126,14 @@ class IngestTransport implements IngestClient {
           for (final envelope in envelopes) envelope.toWireJson(),
         ],
       });
-      final response = await _dio
-          .postUri<String>(
-            uri,
-            data: body,
-            cancelToken: token,
-            options: Options(contentType: 'application/json', headers: headers),
-          )
-          .timeout(
-            timeout,
-            onTimeout: () {
-              timedOut = true;
-              token.cancel('timeout');
-              throw TimeoutException('ingest request timed out');
-            },
-          );
-      return _interpret(response);
+      return await _exchange(body, headers, token).timeout(
+        timeout,
+        onTimeout: () {
+          timedOut = true;
+          token.cancel('timeout');
+          throw TimeoutException('ingest request timed out');
+        },
+      );
     } on TimeoutException {
       return const IngestTimeout();
     } on DioException catch (error) {
@@ -133,6 +145,9 @@ class IngestTransport implements IngestClient {
         case DioExceptionType.receiveTimeout:
           return const IngestTimeout();
         default:
+          if (isPinMismatch(error.error)) {
+            return const IngestNetworkError('certificate pin mismatch');
+          }
           return IngestNetworkError(error.type.name);
       }
     } catch (error) {
@@ -142,11 +157,60 @@ class IngestTransport implements IngestClient {
     }
   }
 
-  IngestOutcome _interpret(Response<String> response) {
+  /// Posts [body] and reads the answer, both within the caller's timeout.
+  Future<IngestOutcome> _exchange(
+    String body,
+    Map<String, dynamic> headers,
+    CancelToken token,
+  ) async {
+    final response = await _dio.postUri<ResponseBody>(
+      uri,
+      data: body,
+      cancelToken: token,
+      options: Options(contentType: 'application/json', headers: headers),
+    );
+    final status = response.statusCode ?? 0;
+    if ((status >= 300 && status < 400) ||
+        response.isRedirect ||
+        response.redirects.isNotEmpty) {
+      // On the web the browser may already have followed it; either way the
+      // answer did not come from the ingest URL and is not trusted.
+      await _discard(response.data);
+      return IngestServerError(status, 'redirect not followed');
+    }
+    final text = await _readCapped(response.data);
+    if (text == null) {
+      return IngestServerError(status, 'response body too large');
+    }
+    return _interpret(response, text);
+  }
+
+  /// The body as text, or null once it passes [maxResponseBytes] (the rest
+  /// is not read).
+  static Future<String?> _readCapped(ResponseBody? body) async {
+    if (body == null) return '';
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in body.stream) {
+      if (bytes.length + chunk.length > maxResponseBytes) return null;
+      bytes.add(chunk);
+    }
+    return utf8.decode(bytes.takeBytes(), allowMalformed: true);
+  }
+
+  static Future<void> _discard(ResponseBody? body) async {
+    if (body == null) return;
+    try {
+      await body.stream.take(1).drain<void>();
+    } catch (_) {
+      // Nothing to do: the response is ignored either way.
+    }
+  }
+
+  IngestOutcome _interpret(Response<ResponseBody> response, String text) {
     final status = response.statusCode ?? 0;
     switch (status) {
       case 202:
-        return parseAcceptedBody(response.data) ??
+        return parseAcceptedBody(text) ??
             const IngestServerError(202, 'unreadable response body');
       case 401:
       case 403:

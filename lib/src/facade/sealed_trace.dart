@@ -400,6 +400,9 @@ abstract final class SealedTrace {
                   clock: overrides?.clock ?? const SystemClock(),
                   attestationTokenProvider:
                       clamped.uploadConfig.attestationTokenProvider,
+                  pinnedSpkiSha256: overrides?.httpClientAdapter == null
+                      ? clamped.uploadConfig.pinnedSpkiSha256
+                      : const [],
                 ),
             config: clamped.uploadConfig,
             counters: counters,

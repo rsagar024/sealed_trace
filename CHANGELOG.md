@@ -65,6 +65,9 @@ First release.
   - Masked URL, headers and bodies, with truncation after masking.
   - Host allowlist; the SDK's own ingest calls are never logged.
   - The request and response are never altered.
+- `UploadConfig.pinnedSpkiSha256`: optional public-key pinning for the
+  ingest server on native platforms, checked before any request bytes are
+  sent.
 - `UploadConfig.attestationTokenProvider`: an optional app-attestation token
   (Firebase App Check, Play Integrity, App Attest) sent as
   `X-SealedTrace-Attestation` with every upload.
@@ -120,3 +123,9 @@ First release.
   masked in a background isolate on native platforms. On the web, large
   batches are encrypted with WebCrypto instead of pure Dart on the main
   thread; its output is byte-identical, checked in Chrome.
+- **Transport hardening.** Uploads never follow redirects (`followRedirects:
+  false`, `maxRedirects: 0`); a `3xx`, or a response the browser reached
+  through a redirect, counts as a failure and its body is ignored. At most
+  256 KB of a response body is read. Optional SPKI pinning
+  (`pinnedSpkiSha256`) rejects a mismatching server before the API key or
+  envelopes are sent.

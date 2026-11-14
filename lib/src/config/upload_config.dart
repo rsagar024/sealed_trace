@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart' show HttpClientAdapter;
 
+import 'equality.dart';
+
 /// Returns an app-attestation token for one upload request, or null.
 typedef AttestationTokenProvider = Future<String?> Function();
 
@@ -18,6 +20,7 @@ class UploadConfig {
     this.uploadOnConnectivityRestored = true,
     this.httpClientAdapter,
     this.attestationTokenProvider,
+    this.pinnedSpkiSha256 = const [],
   });
 
   /// Period of the scheduled upload cycle.
@@ -70,6 +73,19 @@ class UploadConfig {
   /// Compared by identity.
   final AttestationTokenProvider? attestationTokenProvider;
 
+  /// Public-key pins for the ingest server: base64 SHA-256 of a certificate's
+  /// DER `SubjectPublicKeyInfo` (an optional `sha256/` prefix is accepted).
+  /// When set, an upload connects only if the server's leaf certificate
+  /// matches one of them, checked after the TLS handshake and before any
+  /// request bytes, so a mismatching server never sees the API key. Normal
+  /// certificate validation still applies first.
+  ///
+  /// Include a backup pin for the next key, or a rotation will stop uploads
+  /// until the app is updated. Native platforms only (the browser owns TLS on
+  /// the web); requires an https `baseUrl`; cannot be combined with
+  /// [httpClientAdapter]; and connects directly, not through a proxy.
+  final List<String> pinnedSpkiSha256;
+
   /// Returns a copy with the given fields replaced.
   UploadConfig copyWith({
     Duration? interval,
@@ -83,6 +99,7 @@ class UploadConfig {
     bool? uploadOnConnectivityRestored,
     HttpClientAdapter? httpClientAdapter,
     AttestationTokenProvider? attestationTokenProvider,
+    List<String>? pinnedSpkiSha256,
   }) {
     return UploadConfig(
       interval: interval ?? this.interval,
@@ -98,6 +115,7 @@ class UploadConfig {
       httpClientAdapter: httpClientAdapter ?? this.httpClientAdapter,
       attestationTokenProvider:
           attestationTokenProvider ?? this.attestationTokenProvider,
+      pinnedSpkiSha256: pinnedSpkiSha256 ?? this.pinnedSpkiSha256,
     );
   }
 
@@ -114,7 +132,8 @@ class UploadConfig {
       uploadOnResume == other.uploadOnResume &&
       uploadOnConnectivityRestored == other.uploadOnConnectivityRestored &&
       identical(httpClientAdapter, other.httpClientAdapter) &&
-      identical(attestationTokenProvider, other.attestationTokenProvider);
+      identical(attestationTokenProvider, other.attestationTokenProvider) &&
+      listsEqual(pinnedSpkiSha256, other.pinnedSpkiSha256);
 
   @override
   int get hashCode => Object.hash(
@@ -131,5 +150,6 @@ class UploadConfig {
     attestationTokenProvider == null
         ? 0
         : identityHashCode(attestationTokenProvider),
+    Object.hashAll(pinnedSpkiSha256),
   );
 }

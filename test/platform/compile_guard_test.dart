@@ -33,6 +33,7 @@ void main() {
     expect(importing(RegExp(r"dart:io'")), {
       'src/platform/device_info_io.dart',
       'src/storage/open_storage_io.dart',
+      'src/transport/pinned_adapter_io.dart',
     });
   });
 

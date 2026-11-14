@@ -1,3 +1,4 @@
+import '../transport/spki_pin.dart';
 import 'sealed_trace_config.dart';
 
 /// Validates and normalizes a [SealedTraceConfig]. Never throws.
@@ -29,6 +30,22 @@ abstract final class ConfigValidator {
     }
     if (!_looksLikePem(config.publicKeyPem)) {
       problems.add('publicKeyPem must be a PEM-encoded public key');
+    }
+    final pins = config.uploadConfig.pinnedSpkiSha256;
+    if (pins.isNotEmpty) {
+      if (!pins.every(SpkiPin.isValid)) {
+        problems.add(
+          'pinnedSpkiSha256 entries must be base64 SHA-256 hashes (32 bytes)',
+        );
+      }
+      if (config.uploadConfig.httpClientAdapter != null) {
+        problems.add(
+          'pinnedSpkiSha256 cannot be combined with httpClientAdapter',
+        );
+      }
+      if (_isCleartext(config.baseUrl)) {
+        problems.add('pinnedSpkiSha256 requires an https baseUrl');
+      }
     }
     if (!_envName.hasMatch(config.env.name)) {
       problems.add('env must be 1-32 chars of a-z, 0-9, _ or -');

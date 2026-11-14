@@ -276,6 +276,7 @@ The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-A
 | `backoffBase` | 5 s | Retry delay `min(base·2^(n−1), 5 min)`, with jitter between 0.5× and 1×. |
 | `uploadOnResume` | `true` | Upload when the app returns to the foreground. |
 | `uploadOnConnectivityRestored` | `true` | Upload when the network comes back. |
+| `pinnedSpkiSha256` | `[]` | Public-key pins for the ingest server: base64 SHA-256 of the certificate's DER `SubjectPublicKeyInfo` (`sha256/` prefix optional). With pins, an upload connects only if the leaf certificate matches one, checked after the TLS handshake and **before** the request is sent. Add a backup pin for your next key. Native only (ignored on the web); needs an https `baseUrl`; not with `httpClientAdapter`; no proxy. Get a pin with `openssl x509 -in cert.pem -pubkey -noout \| openssl pkey -pubin -outform der \| openssl dgst -sha256 -binary \| openssl base64`. |
 | `attestationTokenProvider` | `null` | `Future<String?> Function()` returning an app-attestation token (Firebase App Check, Play Integrity, App Attest), sent as `X-SealedTrace-Attestation` with every upload. If it fails or returns nothing, the request is not sent and is retried later; no attempt is counted. See [Sender authenticity](#sender-authenticity). |
 | `httpClientAdapter` | `null` | A Dio `HttpClientAdapter` for the SDK's own uploads: a proxy, custom certificates, or a mock server. Only the connection layer changes; the URL, headers and timeouts stay the same. |
 
@@ -352,7 +353,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | Storage | Only ciphertext and index columns are stored. `seq` keeps counting across restarts. A corrupt database is set aside and recreated; if storage can't be opened at all, the SDK falls back to memory and reports it. |
 | Upload triggers | Interval, size threshold, app resume, connectivity restored, `flush()`, and once at start. One cycle runs at a time. Offline cycles are skipped without using an attempt. |
 | Retries | Exponential backoff with jitter. After 5 failed attempts an envelope becomes a dead letter, retried once per app start and kept for 7 days. |
-| Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads until the next `init`; data is kept. `413` → halve the request. `429` → wait for `Retry-After`. Anything else → retry later. |
+| Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads until the next `init`; data is kept. `413` → halve the request. `429` → wait for `Retry-After`. Redirects (`3xx`, or one the browser followed) are never followed and count as a failure, so the key and envelopes never go elsewhere and a redirected `202` is never trusted. A response body over 256 KB is not read and counts as a failure. Anything else → retry later. |
 | Dio interceptor | One `network` event per call, masked: URL, headers, bodies (JSON keys, form fields, bearer tokens), status and duration. Levels: 2xx is `debug`, 4xx is `warning`, and 5xx or no response is `error`. |
 | Web page exit | `visibilitychange` (hidden) and `pagehide` seal the queue synchronously into `localStorage`. The spill moves to IndexedDB at once, or at the next start. |
 | Lifecycle | `init` is idempotent; to change the config, call `dispose` then `init`. Calls made before `init` finishes are dropped. |
@@ -651,7 +652,7 @@ sequenceDiagram
 | AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, 16-byte tag stored separately. |
 | AAD | The clear header is authenticated. AAD = UTF-8 of six lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v2`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt` or `eventCount`, fails decryption. |
 | Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label; `wrappedKey` is 256 bytes. |
-| Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout. |
+| Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout; redirects are not followed; at most 256 KB of response body is read. |
 | Response | `202` with `accepted`, `duplicate` and `rejected[{batchId, reason}]`; unknown fields are ignored. |
 | Vectors | [`test/vectors/envelope_vectors.json`](https://github.com/rsagar024/sealed_trace/blob/master/test/vectors/envelope_vectors.json): known-answer cases and complete envelopes, with a test-only key, for server implementers. |
 
