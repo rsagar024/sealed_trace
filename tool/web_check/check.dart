@@ -26,6 +26,7 @@ import 'package:web/web.dart' as web;
 import 'package:sealed_trace/src/config/mask_config.dart';
 import 'package:sealed_trace/src/crypto/aes_gcm_platform_web.dart';
 import 'package:sealed_trace/src/crypto/crypto_backend.dart';
+import 'package:sealed_trace/src/crypto/der.dart';
 import 'package:sealed_trace/src/crypto/envelope_sealer.dart';
 import 'package:sealed_trace/src/crypto/gcm.dart';
 import 'package:sealed_trace/src/crypto/public_key_parser.dart';
@@ -285,6 +286,32 @@ Future<void> _main() async {
       }
     }
     check('Padme lengths match the reference under dart2js (L6)', padOk);
+  }
+
+  // L9: a huge long-form DER length is a FormatException under dart2js too,
+  // not a negative length and a RangeError.
+  {
+    var derOk = true;
+    for (final bad in [
+      [0x30, 0x84, 0x80, 0x00, 0x00, 0x00],
+      [0x30, 0x84, 0xff, 0xff, 0xff, 0xff],
+      [0x30, 0x83, 0xff, 0xff, 0xff],
+      [0x30, 0x81, 0x05, 0, 0, 0, 0, 0],
+    ]) {
+      try {
+        readDerElement(Uint8List.fromList(bad));
+        derOk = false;
+      } on FormatException {
+        // Expected.
+      } catch (error) {
+        emit('TRACE der $bad: $error');
+        derOk = false;
+      }
+    }
+    check(
+      'malformed DER lengths are FormatExceptions under dart2js (L9)',
+      derOk,
+    );
   }
 
   // Sealing on the main thread. The queue caps a batch at 25 events and

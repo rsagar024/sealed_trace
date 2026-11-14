@@ -158,6 +158,11 @@ First release.
   `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
   no longer shows whether a `fatal` occurred. The vectors and their spec are
   updated.
+- **Strict DER parsing.** Public keys (and certificates for pinning) must be
+  strict DER: low tag numbers only, definite and minimal lengths of at most
+  3 bytes, and INTEGERs without redundant leading zeros. A huge long-form
+  length can no longer turn negative under dart2js and throw a `RangeError`;
+  malformed input is always a `FormatException`.
 - **`setContext` is bounded and cannot set the user name.** The context that
   `setContext` builds up across calls is limited to 100 keys and 16 KB of
   JSON; entries past a limit are dropped (the old value is kept), counted in
