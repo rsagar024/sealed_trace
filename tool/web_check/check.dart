@@ -24,6 +24,8 @@ import 'package:crypto/crypto.dart' show sha256;
 import 'package:web/web.dart' as web;
 
 import 'package:sealed_trace/src/config/mask_config.dart';
+import 'package:sealed_trace/src/crypto/aes_gcm_platform_web.dart';
+import 'package:sealed_trace/src/crypto/crypto_backend.dart';
 import 'package:sealed_trace/src/crypto/envelope_sealer.dart';
 import 'package:sealed_trace/src/crypto/gcm.dart';
 import 'package:sealed_trace/src/crypto/public_key_parser.dart';
@@ -73,9 +75,11 @@ const RetentionPolicy _bigPolicy = RetentionPolicy(
   deadLetterTtl: Duration(days: 7),
 );
 
+// The production web backend: batches over 8 KB go through WebCrypto (M5).
 EnvelopeSealer _sealer() => EnvelopeSealer(
   publicKey: PublicKeyParser.parse(testPublicKeySpki),
   projectId: 'project-web',
+  backend: DefaultCryptoBackend(offload: platformAesGcmOffload()),
 );
 
 LogRecord _record(int seq, {String message = 'event', Object? field}) =>
@@ -224,6 +228,40 @@ Future<void> _main() async {
     emit('GCM $size ${_hash(ct)} ${base64Encode(tag)}');
   }
 
+  // M5: WebCrypto must produce exactly what the pure-Dart cipher produces,
+  // with and without additional data, or envelopes would not open.
+  for (final size in const [0, 1, 15, 16, 17, 100, 4096, 100000]) {
+    for (final aadLength in const [0, 13, 200]) {
+      final key = Uint8List.fromList(
+        List.generate(32, (i) => (i * 11 + size) & 0xff),
+      );
+      final iv = Uint8List.fromList(
+        List.generate(12, (i) => (i * 3 + aadLength) & 0xff),
+      );
+      final plain = Uint8List.fromList(
+        List.generate(size, (i) => (i * 17 + 3) & 0xff),
+      );
+      final aad = Uint8List.fromList(
+        List.generate(aadLength, (i) => (i * 5 + 1) & 0xff),
+      );
+      final job = AesGcmJob(key, iv, plain, aad);
+      final dart = await runAesGcm(job);
+      var ok = false;
+      try {
+        final native = await webCryptoAesGcm(job);
+        ok =
+            _hash(native.ciphertext) == _hash(dart.ciphertext) &&
+            base64Encode(native.tag) == base64Encode(dart.tag);
+      } catch (error) {
+        emit('TRACE webcrypto $size/$aadLength: $error');
+      }
+      check(
+        'WebCrypto AES-GCM equals pure Dart: $size B, AAD $aadLength B',
+        ok,
+      );
+    }
+  }
+
   // Sealing on the main thread. The queue caps a batch at 25 events and
   // 64 KB unless a single event is larger, so the largest real batches are
   // "25 events filling 64 KB" and "one event at the 128 K cap". The 25 x 128 K
@@ -251,6 +289,11 @@ Future<void> _main() async {
       'ENVELOPE ${jsonEncode({'name': entry.key, 'wire': envelope.toWireJson(), 'plainHash': _hash(utf8.encode(plaintext))})}',
     );
   }
+
+  check(
+    'sealing used WebCrypto with no pure-Dart fallback',
+    webCryptoFallbacks == 0,
+  );
 
   // Masking a worst-case event on the caller's (main) thread.
   final big = {'field': _noise(127000, 9), 'email': 'asha@example.com'};

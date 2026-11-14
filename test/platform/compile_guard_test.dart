@@ -38,6 +38,7 @@ void main() {
 
   test('browser libraries appear only in the web-only files', () {
     expect(importing(RegExp(r"dart:js_interop'|package:web/")), {
+      'src/crypto/aes_gcm_platform_web.dart',
       'src/platform/device_info_web.dart',
       'src/platform/page_events_web.dart',
       'src/storage/envelope_spill_web.dart',

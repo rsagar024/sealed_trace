@@ -46,7 +46,8 @@ First release.
     `createdAt`, `eventCount`) is authenticated as AES-GCM AAD. Known-answer
     vectors in
     `test/vectors/envelope_vectors.json`.
-  - Large batches are sealed in a background isolate on native platforms.
+  - Large batches are sealed in a background isolate on native platforms
+    and with WebCrypto on the web.
 - **Offline storage of ciphertext only.**
   - SQLite (drift) on native platforms, IndexedDB on the web.
   - Retention by count, age and size, with an emergency purge when storage is
@@ -113,3 +114,9 @@ First release.
   now covers log messages, not only network bodies, and map keys holding PII
   (for example a map keyed by email) are masked. Identity keys such as
   `iban`, `passport`, `aadhaar` and `nationalId` are masked by default.
+- **The host app's UI thread is protected from heavy work.** The
+  in-memory queue is capped at 8 MiB as well as 5 000 events. Network
+  bodies over 256 KB are not parsed, and bodies over 32 KB are parsed and
+  masked in a background isolate on native platforms. On the web, large
+  batches are encrypted with WebCrypto instead of pure Dart on the main
+  thread; its output is byte-identical, checked in Chrome.

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 
 import '../masking/masking_engine.dart';
 
@@ -22,11 +24,12 @@ class BodySanitizer {
   /// Characters kept per body, before the truncation marker.
   final int maxBodyChars;
 
-  /// Bodies larger than this are not processed at all.
-  static const int maxCaptureChars = 1000000;
+  /// Bodies larger than this are not processed at all. Bounds the parsing
+  /// and masking work one hostile or huge response can cause.
+  static const int maxCaptureChars = 256 * 1024;
 
   /// Structured bodies with more nodes than this are not processed.
-  static const int maxCaptureNodes = 200000;
+  static const int maxCaptureNodes = 50000;
 
   /// Content types that are never text.
   static final RegExp _binaryType = RegExp(
@@ -35,22 +38,97 @@ class BodySanitizer {
     r'vnd\.openxmlformats|msword|wasm)',
   );
 
+  /// Text bodies at least this long are sanitized off the UI isolate.
+  static const int offloadChars = 32 * 1024;
+
+  /// Structured bodies with more nodes than this are sanitized off the UI
+  /// isolate.
+  static const int offloadNodes = 2000;
+
   /// Sanitizes the body of [options].
-  String? sanitizeRequest(RequestOptions options) => sanitize(
-    options.data,
-    contentType:
-        options.contentType ??
-        _headerValue(options.headers, Headers.contentTypeHeader),
-  );
+  String? sanitizeRequest(RequestOptions options) =>
+      sanitize(options.data, contentType: _requestType(options));
 
   /// Sanitizes the body of [response].
   String? sanitizeResponse(Response<dynamic> response) => sanitize(
     response.data,
     contentType: response.headers.value(Headers.contentTypeHeader),
-    declaredLength: int.tryParse(
-      response.headers.value(Headers.contentLengthHeader) ?? '',
-    ),
+    declaredLength: _declaredLength(response),
   );
+
+  /// Like [sanitizeRequest], but see [sanitizeOffloaded].
+  FutureOr<String?> sanitizeRequestOffloaded(RequestOptions options) =>
+      sanitizeOffloaded(options.data, contentType: _requestType(options));
+
+  /// Like [sanitizeResponse], but see [sanitizeOffloaded].
+  FutureOr<String?> sanitizeResponseOffloaded(Response<dynamic> response) =>
+      sanitizeOffloaded(
+        response.data,
+        contentType: response.headers.value(Headers.contentTypeHeader),
+        declaredLength: _declaredLength(response),
+      );
+
+  /// Like [sanitize], but a large body (at least [offloadChars] of text, or
+  /// more than [offloadNodes] structured nodes) is parsed and masked in a
+  /// background isolate on native platforms, so a hostile or huge response
+  /// cannot stall the UI. Small bodies, and every body on the web, are
+  /// sanitized synchronously and returned as a plain value.
+  ///
+  /// The isolate uses a snapshot of the engine, so keys and patterns added at
+  /// runtime apply. If the body cannot be sent to an isolate, it is
+  /// sanitized here instead. Never throws.
+  FutureOr<String?> sanitizeOffloaded(
+    Object? data, {
+    String? contentType,
+    int? declaredLength,
+  }) {
+    if (kIsWeb || !_worthOffloading(data, declaredLength)) {
+      return sanitize(
+        data,
+        contentType: contentType,
+        declaredLength: declaredLength,
+      );
+    }
+    final job = SanitizeJob(
+      engine.snapshot(),
+      maxBodyChars,
+      data,
+      contentType,
+      declaredLength,
+    );
+    return compute(sanitizeInIsolate, job).then<String?>(
+      (value) => value,
+      onError: (Object _) => sanitize(
+        data,
+        contentType: contentType,
+        declaredLength: declaredLength,
+      ),
+    );
+  }
+
+  bool _worthOffloading(Object? data, int? declaredLength) {
+    try {
+      if (data == null) return false;
+      if (declaredLength != null && declaredLength > maxCaptureChars) {
+        return false; // Becomes a placeholder at no cost.
+      }
+      if (data is String) {
+        return data.length >= offloadChars && data.length <= maxCaptureChars;
+      }
+      if (data is Uint8List || data is List<int>) return false;
+      if (data is Map || data is Iterable) return _exceeds(data, offloadNodes);
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static String? _requestType(RequestOptions options) =>
+      options.contentType ??
+      _headerValue(options.headers, Headers.contentTypeHeader);
+
+  static int? _declaredLength(Response<dynamic> response) =>
+      int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '');
 
   /// Sanitizes [data], or returns null when there is no body.
   String? sanitize(Object? data, {String? contentType, int? declaredLength}) {
@@ -173,3 +251,42 @@ class BodySanitizer {
     (m) => '${m[1]}${m[2]}${engine.replacement}',
   );
 }
+
+/// One body to sanitize in a background isolate. Plain, sendable data.
+class SanitizeJob {
+  /// Creates a job.
+  const SanitizeJob(
+    this.snapshot,
+    this.maxBodyChars,
+    this.data,
+    this.contentType,
+    this.declaredLength,
+  );
+
+  /// The masking rules to apply.
+  final MaskingSnapshot snapshot;
+
+  /// Characters kept per body.
+  final int maxBodyChars;
+
+  /// The body: a string, or a JSON-like map or list.
+  final Object? data;
+
+  /// The body's content type, lower-cased or null.
+  final String? contentType;
+
+  /// The declared `Content-Length`, if any.
+  final int? declaredLength;
+}
+
+/// Sanitizes [job] with an engine rebuilt from its snapshot. A top-level
+/// function so it can run in a background isolate.
+String? sanitizeInIsolate(SanitizeJob job) =>
+    BodySanitizer(
+      MaskingEngine.fromSnapshot(job.snapshot),
+      maxBodyChars: job.maxBodyChars,
+    ).sanitize(
+      job.data,
+      contentType: job.contentType,
+      declaredLength: job.declaredLength,
+    );

@@ -26,6 +26,7 @@ class MaskingEngine {
        _maskUserName = config.maskUserName,
        _useDefaultKeys = config.useDefaultKeys,
        _maskUrlPathSegments = config.maskUrlPathSegments,
+       _usesDefaultPatterns = config.useDefaultPatterns,
        _onError = onError {
     _credentials = CredentialPass(
       isSensitive: isSensitiveHeader,
@@ -54,11 +55,53 @@ class MaskingEngine {
   final void Function(Object error, StackTrace stack)? _onError;
   final bool _useDefaultKeys;
   final bool _maskUrlPathSegments;
+  final bool _usesDefaultPatterns;
   late final CredentialPass _credentials;
   final Set<String> _keys = <String>{};
   final List<String> _fragments = <String>[];
   final Set<String> _headerDenylist = <String>{};
   final List<MaskRule> _rules = <MaskRule>[];
+  final List<RegExp> _extraPatterns = <RegExp>[];
+
+  /// Everything this engine masks with, including keys and patterns added at
+  /// runtime, as plain data that can be sent to another isolate.
+  MaskingSnapshot snapshot() => MaskingSnapshot(
+    replacement: replacement,
+    maskUserName: _maskUserName,
+    useDefaultKeys: _useDefaultKeys,
+    useDefaultPatterns: _usesDefaultPatterns,
+    maskUrlPathSegments: _maskUrlPathSegments,
+    keys: _keys.toList(),
+    headerDenylist: _headerDenylist.toList(),
+    patterns: [
+      for (final p in _extraPatterns)
+        (p.pattern, p.isCaseSensitive, p.isMultiLine, p.isUnicode, p.isDotAll),
+    ],
+  );
+
+  /// Rebuilds an engine from [snapshot], for example inside an isolate.
+  factory MaskingEngine.fromSnapshot(MaskingSnapshot snapshot) => MaskingEngine(
+    MaskConfig(
+      replacement: snapshot.replacement,
+      maskUserName: snapshot.maskUserName,
+      useDefaultKeys: snapshot.useDefaultKeys,
+      useDefaultPatterns: snapshot.useDefaultPatterns,
+      maskUrlPathSegments: snapshot.maskUrlPathSegments,
+      extraKeys: snapshot.keys,
+      extraHeaderDenylist: snapshot.headerDenylist,
+      extraPatterns: [
+        for (final (source, caseSensitive, multiLine, unicode, dotAll)
+            in snapshot.patterns)
+          RegExp(
+            source,
+            caseSensitive: caseSensitive,
+            multiLine: multiLine,
+            unicode: unicode,
+            dotAll: dotAll,
+          ),
+      ],
+    ),
+  );
 
   /// Strings longer than this have their tail dropped instead of masked.
   static const int maxStringChars = 100000;
@@ -92,6 +135,7 @@ class MaskingEngine {
       return false;
     }
     _rules.add(MaskRule(pattern, (m, replacement) => replacement));
+    _extraPatterns.add(pattern);
     return true;
   }
 
@@ -301,4 +345,44 @@ class MaskingEngine {
   void _report(Object error, [StackTrace? stack]) {
     _onError?.call(error, stack ?? StackTrace.current);
   }
+}
+
+/// A [MaskingEngine]'s rules as plain, sendable data. Patterns are kept as
+/// their source and flags, and rebuilt on the other side.
+class MaskingSnapshot {
+  /// Creates a snapshot.
+  const MaskingSnapshot({
+    required this.replacement,
+    required this.maskUserName,
+    required this.useDefaultKeys,
+    required this.useDefaultPatterns,
+    required this.maskUrlPathSegments,
+    required this.keys,
+    required this.headerDenylist,
+    required this.patterns,
+  });
+
+  /// Text that replaces masked values.
+  final String replacement;
+
+  /// Whether `ctx.userName` is masked.
+  final bool maskUserName;
+
+  /// Whether the default keys and fragments apply.
+  final bool useDefaultKeys;
+
+  /// Whether the default patterns apply.
+  final bool useDefaultPatterns;
+
+  /// Whether URL path segments are masked.
+  final bool maskUrlPathSegments;
+
+  /// Every exact sensitive key, normalized.
+  final List<String> keys;
+
+  /// Every denylisted header name, lower-cased.
+  final List<String> headerDenylist;
+
+  /// Extra patterns: source, caseSensitive, multiLine, unicode, dotAll.
+  final List<(String, bool, bool, bool, bool)> patterns;
 }

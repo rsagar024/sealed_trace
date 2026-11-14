@@ -107,7 +107,7 @@ Nothing else needs importing.
 |---|---|---|---|---|
 | Android | SQLite (drift), WAL | background isolate above 8 KB | `paused` / `inactive` / `detached` flush the queue | ✅ emulator (Android 16, debug + release/R8), one phone ¹ |
 | iOS | SQLite (drift) | background isolate above 8 KB | `paused` / `inactive` flush the queue | ⏳ not run ² |
-| Web | IndexedDB + `localStorage` spill | main thread | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ Chrome, Edge, Firefox (headless) ³ |
+| Web | IndexedDB + `localStorage` spill | WebCrypto above 8 KB (pure Dart if unavailable, and for the synchronous page-exit seal) | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ Chrome, Edge, Firefox (headless) ³ |
 | Windows | SQLite (drift), WAL | background isolate above 8 KB | `detached` flushes; the 2 s write-behind covers the rest | 🧪 Dart VM only ⁴ |
 | macOS | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
 | Linux | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
@@ -301,7 +301,7 @@ once.
 | Field | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | `false` makes the interceptor a pure pass-through. |
-| `maxBodyChars` | 20 000 | Bodies are truncated **after** masking. |
+| `maxBodyChars` | 20 000 | Bodies are truncated **after** masking. Bodies over 256 KB (or 50 000 JSON nodes) are not parsed at all and become a size placeholder; bodies over 32 KB (or 2 000 nodes) are parsed and masked in a background isolate on native platforms, so a huge response cannot stall the UI. |
 | `hostAllowlist` | `[]` | Hosts to log; empty means all. `*.example.com` matches subdomains but not `example.com` itself. |
 | `captureRequestBody` | `true` | Log request bodies. |
 | `captureResponseBody` | `true` | Log response bodies. |
@@ -348,7 +348,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 |---|---|
 | Levels | `verbose < debug < info < warning < error < fatal`. `fatal`, and `error` outside `prod`, are sealed at once; everything else waits in the write-behind queue. |
 | Write-behind queue | In memory, never on disk in plaintext. It is flushed after 2 s, at 25 events or at 64 KB, and when the app is paused, hidden or detached. |
-| Sealing | One queue batch becomes one envelope (one `batchId`). Plaintext JSON → AES-256-GCM (fresh key, 12-byte IV) → RSA-OAEP key wrap. Batches over 8 KB are encrypted in a background isolate on native platforms. If sealing fails, the batch is dropped and counted, never stored in plaintext. |
+| Sealing | One queue batch becomes one envelope (one `batchId`). Plaintext JSON → AES-256-GCM (fresh key, 12-byte IV) → RSA-OAEP key wrap. Batches over 8 KB are encrypted in a background isolate on native platforms and with WebCrypto (`crypto.subtle`) on the web; the page-exit seal stays synchronous pure Dart. If sealing fails, the batch is dropped and counted, never stored in plaintext. |
 | Storage | Only ciphertext and index columns are stored. `seq` keeps counting across restarts. A corrupt database is set aside and recreated; if storage can't be opened at all, the SDK falls back to memory and reports it. |
 | Upload triggers | Interval, size threshold, app resume, connectivity restored, `flush()`, and once at start. One cycle runs at a time. Offline cycles are skipped without using an attempt. |
 | Retries | Exponential backoff with jitter. After 5 failed attempts an envelope becomes a dead letter, retried once per app start and kept for 7 days. |
@@ -374,7 +374,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 |---|---|
 | `eventsAccepted` | Events that passed the level gate and were queued. |
 | `eventsDroppedLevel` | Events below `minLevel`. |
-| `eventsDroppedQueueFull` | Events dropped because the in-memory queue was full (5 000). |
+| `eventsDroppedQueueFull` | Events dropped because the in-memory queue was full (5 000 events or 8 MiB, oldest first). |
 | `sealFailures` | Batches that could not be sealed (dropped, never stored in plaintext). |
 | `storageFailures` | Storage errors, including the memory fallback. |
 | `uploadAttempts` / `uploadFailures` | Upload requests, and failed requests. |

@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show compute;
 import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/config_validator.dart';
 import '../config/sealed_trace_config.dart';
+import '../crypto/aes_gcm_platform.dart';
 import '../crypto/crypto_backend.dart';
 import '../crypto/envelope_sealer.dart';
 import '../crypto/public_key_parser.dart';
@@ -345,7 +345,7 @@ abstract final class SealedTrace {
           projectId: clamped.projectId,
           backend:
               overrides?.cryptoBackend ??
-              DefaultCryptoBackend(offload: (job) => compute(runAesGcm, job)),
+              DefaultCryptoBackend(offload: platformAesGcmOffload()),
           clock: overrides?.clock ?? const SystemClock(),
           newId: newId,
         );
