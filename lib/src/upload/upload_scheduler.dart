@@ -93,6 +93,14 @@ class UploadScheduler {
   /// The pause ends by itself after [authPause]; the next cycle then probes.
   bool get isPaused => _paused;
 
+  /// Stored bytes of pending rows fetched as candidates for one request.
+  ///
+  /// A request can never carry more than [BatchPacker.maxRequestBytes], so
+  /// fetching more is pointless. This replaces `1 << 40`, which dart2js
+  /// evaluates to 0 because its shifts are 32-bit (L11), so web clients
+  /// fetched one envelope per request.
+  static const int candidateBytes = BatchPacker.maxRequestBytes;
+
   /// First pause after a 401/403 from the ingest server (a JSON body).
   static const Duration authPauseConfirmed = Duration(hours: 1);
 
@@ -244,7 +252,7 @@ class UploadScheduler {
     while (!_disposed && !_paused && retryIn == null) {
       final rows = await store.nextPending(
         limit: limit,
-        maxBytes: 1 << 40,
+        maxBytes: candidateBytes,
         exclude: failedIds,
       );
       if (rows.isEmpty) break;

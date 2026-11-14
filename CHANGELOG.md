@@ -160,6 +160,11 @@ First release.
   `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
   no longer shows whether a `fatal` occurred. The vectors and their spec are
   updated.
+- **Web uploads batch again.** The upload cycle bounded its candidate rows
+  with `1 << 40`, which dart2js evaluates to 0 (32-bit shifts), so web
+  clients sent one envelope per request. The bound is now the 2 MB request
+  limit, checked in Chrome, and a test fails on any shift of 32 or more in
+  `lib/`.
 - **Corrupt-database copies no longer pile up.** When a corrupt
   `sealed_trace.db` is set aside, its `.corrupt-<time>` copy (with `-wal`
   and `-shm`) is now deleted at a later successful open once it is 7 days

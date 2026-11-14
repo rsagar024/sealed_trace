@@ -43,8 +43,10 @@ import 'package:sealed_trace/src/queue/write_behind_queue.dart';
 import 'package:sealed_trace/src/storage/envelope_spill.dart';
 import 'package:sealed_trace/src/storage/envelope_store.dart';
 import 'package:sealed_trace/src/storage/indexeddb_storage_adapter.dart';
+import 'package:sealed_trace/src/storage/memory_storage_adapter.dart';
 import 'package:sealed_trace/src/storage/retention_policy.dart';
 import 'package:sealed_trace/src/storage/storage_adapter.dart';
+import 'package:sealed_trace/src/upload/batch_packer.dart';
 
 import '../../test/helpers/test_keys.dart';
 
@@ -314,10 +316,40 @@ Future<void> _main() async {
     );
   }
 
+  // L11: under dart2js `1 << 40` is 0 (32-bit shifts), so the old upload
+  // bound fetched one envelope per request. The new bound is a plain
+  // constant and fetches the whole batch.
+  {
+    final memory = MemoryStorageAdapter();
+    await memory.open();
+    final candidates = EnvelopeStore(adapter: memory, policy: _bigPolicy);
+    final sealer = _sealer();
+    for (var i = 1; i <= 5; i++) {
+      await candidates.append(await sealer.seal([_record(i)]));
+    }
+    // Computed at run time so dart2js cannot fold it at compile time.
+    final forty = 40 + _out.length * 0;
+    final oldBound = 1 << forty;
+    final oldRows = await candidates.nextPending(limit: 50, maxBytes: oldBound);
+    final newRows = await candidates.nextPending(
+      limit: 50,
+      maxBytes: BatchPacker.maxRequestBytes,
+    );
+    emit(
+      'TRACE L11: 1 << 40 = $oldBound; old bound fetched '
+      '${oldRows.length}, new bound fetched ${newRows.length}',
+    );
+    check(
+      'upload candidates are not limited to one envelope on the web (L11)',
+      newRows.length == 5,
+    );
+  }
+
   // Sealing on the main thread. The queue caps a batch at 25 events and
   // 64 KB unless a single event is larger, so the largest real batches are
   // "25 events filling 64 KB" and "one event at the 128 K cap". The 25 x 128 K
   // case cannot come out of the queue; it is measured as an upper bound.
+  final webCryptoBefore = webCryptoUses;
   final sealer = _sealer();
   final cases = <String, List<LogRecord>>{
     '25 small': [for (var i = 1; i <= 25; i++) _record(i)],
@@ -348,7 +380,7 @@ Future<void> _main() async {
   );
   check(
     'every async seal, small ones too, used WebCrypto (L5)',
-    webCryptoUses == cases.length,
+    webCryptoUses - webCryptoBefore == cases.length,
   );
 
   // Masking a worst-case event on the caller's (main) thread.
