@@ -96,13 +96,21 @@ Future<Map<String, dynamic>> _deviceContext() async {
         : Platform.operatingSystem,
   };
   try {
+    // Identifiers are sent as SealedTrace.pseudonym(...), never raw (L12):
+    // events still group by device, but the identifier stays on the device.
     if (!kIsWeb && Platform.isAndroid) {
       final a = await DeviceInfoPlugin().androidInfo;
-      device['deviceId'] = a.id; // e.g. BE2A.250530.026.F3
+      // `id` is Build.ID, the build identifier (e.g. BE2A.250530.026.F3),
+      // shared by every device on that build: it does not identify one
+      // device. For a real per-device id, store a random UUID per install
+      // (for example with shared_preferences) and pass that instead.
+      final id = SealedTrace.pseudonym(a.id);
+      if (id != null) device['deviceId'] = id;
       device['deviceModel'] = a.model; // e.g. Pixel 8
     } else if (!kIsWeb && Platform.isIOS) {
       final i = await DeviceInfoPlugin().iosInfo;
-      final id = i.identifierForVendor;
+      final vendorId = i.identifierForVendor;
+      final id = vendorId == null ? null : SealedTrace.pseudonym(vendorId);
       if (id != null) device['deviceId'] = id;
       device['deviceModel'] = i.modelName; // e.g. iPhone 15 Pro
     }

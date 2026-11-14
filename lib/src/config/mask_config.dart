@@ -12,6 +12,7 @@ class MaskConfig {
     this.replacement = '***',
     this.maskUserName = true,
     this.maskUrlPathSegments = false,
+    this.pseudonymizeUserId = false,
   });
 
   /// Extra sensitive keys, matched on the whole key, ignoring case and the
@@ -47,6 +48,12 @@ class MaskConfig {
   /// Defaults to false, because ids in paths are often useful for debugging.
   final bool maskUrlPathSegments;
 
+  /// When true, the id passed to `SealedTrace.setUser` is sent as its
+  /// `SealedTrace.pseudonym` (`p_` plus 22 characters) instead of as given.
+  /// Events from one user still group together in the console, but the raw
+  /// id never leaves the device. Defaults to false.
+  final bool pseudonymizeUserId;
+
   /// Returns a copy with the given fields replaced.
   MaskConfig copyWith({
     List<String>? extraKeys,
@@ -57,6 +64,7 @@ class MaskConfig {
     String? replacement,
     bool? maskUserName,
     bool? maskUrlPathSegments,
+    bool? pseudonymizeUserId,
   }) {
     return MaskConfig(
       extraKeys: extraKeys ?? this.extraKeys,
@@ -67,6 +75,7 @@ class MaskConfig {
       replacement: replacement ?? this.replacement,
       maskUserName: maskUserName ?? this.maskUserName,
       maskUrlPathSegments: maskUrlPathSegments ?? this.maskUrlPathSegments,
+      pseudonymizeUserId: pseudonymizeUserId ?? this.pseudonymizeUserId,
     );
   }
 
@@ -80,7 +89,8 @@ class MaskConfig {
       useDefaultPatterns == other.useDefaultPatterns &&
       replacement == other.replacement &&
       maskUserName == other.maskUserName &&
-      maskUrlPathSegments == other.maskUrlPathSegments;
+      maskUrlPathSegments == other.maskUrlPathSegments &&
+      pseudonymizeUserId == other.pseudonymizeUserId;
 
   @override
   int get hashCode => Object.hash(
@@ -92,5 +102,6 @@ class MaskConfig {
     replacement,
     maskUserName,
     maskUrlPathSegments,
+    pseudonymizeUserId,
   );
 }

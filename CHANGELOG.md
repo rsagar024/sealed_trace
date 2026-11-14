@@ -160,6 +160,13 @@ First release.
   `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
   no longer shows whether a `fatal` occurred. The vectors and their spec are
   updated.
+- **Fewer raw identifiers.** New `SealedTrace.pseudonym(value)` gives a
+  stable, project-scoped pseudonym (HMAC-SHA256 keyed by the project id) for
+  ids such as `deviceId`; the example app now sends its device id that way.
+  New `MaskConfig(pseudonymizeUserId: true)` sends the `setUser` id as its
+  pseudonym. On the web, `ctx.os` is now only the browser, its major version
+  and the OS (`Chrome 157 on Windows`), not up to 120 characters of user
+  agent.
 - **Web uploads batch again.** The upload cycle bounded its candidate rows
   with `1 << 40`, which dart2js evaluates to 0 (32-bit shifts), so web
   clients sent one envelope per request. The bound is now the 2 MB request

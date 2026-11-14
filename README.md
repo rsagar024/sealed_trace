@@ -174,7 +174,7 @@ Two rules to know up front:
    ```dart
    SealedTrace.setUser('<user id>', name: '<user name>');      // id: opaque, never an email; name: see below
    SealedTrace.setContext({
-     'deviceId': '<device id>',       // Android: androidInfo.id · iOS: iosInfo.identifierForVendor
+     'deviceId': '<device id>',       // a pseudonym, see below
      'deviceModel': '<device model>', // Android: androidInfo.model · iOS: iosInfo.modelName
    });
    ```
@@ -190,9 +190,14 @@ Two rules to know up front:
 
    | Key | Android | iOS |
    |---|---|---|
-   | `deviceId` | `androidInfo.id` | `iosInfo.identifierForVendor` |
+   | `deviceId` | `SealedTrace.pseudonym(...)` of a per-install id | `SealedTrace.pseudonym(iosInfo.identifierForVendor)` |
    | `deviceModel` | `androidInfo.model` | `iosInfo.modelName` |
 
+   - **Send identifiers as pseudonyms.** `SealedTrace.pseudonym(value)` returns `p_` plus 22 characters (an
+     HMAC-SHA256 keyed by the project id): stable within the project, so the console can still group events, but the
+     raw identifier never leaves the device. It is pseudonymous, not anonymous (the project id ships in the app), so
+     use it for high-entropy ids, not emails or phone numbers. On Android, `androidInfo.id` is `Build.ID`, shared by
+     every device on a build; for a real per-device id store a random UUID per install and pseudonymize that.
    - Don't set `platform`, `os`, `appVersion`, `buildNumber`, `locale`, `env` or `network`. The SDK fills them in,
      and its values win over `setContext`.
    - `userName` and `userDisplayName` passed to `setContext` are ignored: only `setUser` sets them.
@@ -259,6 +264,7 @@ Two rules to know up front:
 | `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens; API keys with a known prefix (AWS `AKIA…`, Stripe `sk_`/`rk_live_…`, GitHub `ghp_…`/`github_pat_…`, Google `AIza…`, Slack `xox…-`, GitLab `glpat-`); IBANs (mod-97 checked); dashed US SSNs; Aadhaar numbers (Verhoeff checked); Indian PAN; IPv4 and IPv6 addresses; email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. All apply to every string and to map keys. |
 | `replacement` | `'***'` | Replacement text. |
 | `maskUrlPathSegments` | `false` | `true` replaces URL path segments that are not plain words in network logs: `/reset/9f8a2c` → `/reset/***`, `/users/asha.rao` → `/users/***`. Words, `-`, `_` and `v2`-style versions are kept. |
+| `pseudonymizeUserId` | `false` | `true` sends `SealedTrace.pseudonym(id)` instead of the `setUser` id, so events from one user still group but the raw id stays on the device. |
 | `maskUserName` | `true` | Sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. `false` sends the name as given so the console's log list and detail can show it. |
 
 The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
@@ -571,7 +577,9 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   `loyaltyId`. Add such keys with `extraKeys` or `addMaskKeys`. JWTs and `Bearer` tokens are masked in every
   string whatever the key.
 - **Fragment matching can over-mask**: `passwordHint` or `tokenCount` are masked too.
-- **`userId`, `tag` and the device context are never masked.** Don't put personal data in them. A name passed to
+- **`userId`, `tag` and the device context are never masked.** Don't put personal data in them; send ids as
+  `SealedTrace.pseudonym(...)` or set `MaskConfig(pseudonymizeUserId: true)`. On the web `os` is only the browser,
+  its major version and the OS (for example `Chrome 157 on Windows`), never the full user agent. A name passed to
   `setUser(name:)` stays on the device by default (`***` in `ctx.userName`, no `ctx.userDisplayName`). If you
   opt in with `sendUserDisplayName: true` or `maskUserName: false`, the server can read it.
 - **Logs are not proof of origin.** The API key can be extracted from the app, so without attestation anyone can

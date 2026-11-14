@@ -37,6 +37,7 @@ import 'package:sealed_trace/src/event/sealing_batch_handler.dart';
 import 'package:sealed_trace/src/masking/masking_engine.dart';
 import 'package:sealed_trace/src/model/log_level.dart';
 import 'package:sealed_trace/src/model/sealed_envelope.dart';
+import 'package:sealed_trace/src/platform/device_info_web.dart';
 import 'package:sealed_trace/src/platform/lifecycle_binding.dart';
 import 'package:sealed_trace/src/platform/page_events_web.dart';
 import 'package:sealed_trace/src/queue/write_behind_queue.dart';
@@ -144,6 +145,14 @@ Future<void> main() async {
   final phase = params['phase'] ?? 'main';
   emit('PHASE $phase');
   emit('UA ${web.window.navigator.userAgent}');
+  // L12: the SDK reports only "<browser> <major> on <OS>", never the UA.
+  final reportedOs = readPlatformInfo().os;
+  emit('TRACE L12 os: $reportedOs');
+  check(
+    'the web os is coarse, not the user agent (L12)',
+    RegExp(r'^[A-Za-z ]+ \d{1,4} on [A-Za-z]+$').hasMatch(reportedOs) &&
+        !reportedOs.contains('Mozilla'),
+  );
   try {
     switch (phase) {
       case 'main':

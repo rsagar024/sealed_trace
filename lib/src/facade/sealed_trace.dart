@@ -13,6 +13,7 @@ import '../crypto/envelope_sealer.dart';
 import '../crypto/public_key_parser.dart';
 import '../diagnostics/diagnostic_counters.dart';
 import '../event/context_limits.dart';
+import '../masking/pseudonym.dart';
 import '../diagnostics/internal_logger.dart';
 import '../event/event_builder.dart';
 import '../event/event_pipeline.dart';
@@ -176,7 +177,10 @@ abstract final class SealedTrace {
     final runtime = _runtime;
     if (runtime == null) return;
     try {
-      runtime.userId = id;
+      runtime.userId =
+          id != null && runtime.config.maskConfig.pseudonymizeUserId
+          ? Pseudonym.of(id, projectId: runtime.config.projectId)
+          : id;
       final userName = normalizeUserDisplayName(name);
       runtime.userName = userName;
       runtime.userDisplayName = runtime.config.sendUserDisplayName
@@ -184,6 +188,25 @@ abstract final class SealedTrace {
           : null;
     } catch (error, stack) {
       _report(error, stack);
+    }
+  }
+
+  /// A stable pseudonym for [value] in this project: `p_` plus 22
+  /// characters, the first 128 bits of an HMAC-SHA256 keyed by the project
+  /// id. Use it for identifiers that should group events without revealing
+  /// the raw value, such as a device id in `setContext` (L12).
+  ///
+  /// It is pseudonymous, not anonymous: the project id ships in the app, so
+  /// someone who has it can test guesses. Use it for high-entropy ids, not
+  /// for emails or phone numbers. Returns null before [init].
+  static String? pseudonym(String value) {
+    final runtime = _runtime;
+    if (runtime == null) return null;
+    try {
+      return Pseudonym.of(value, projectId: runtime.config.projectId);
+    } catch (error, stack) {
+      _report(error, stack);
+      return null;
     }
   }
 
