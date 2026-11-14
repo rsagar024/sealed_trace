@@ -358,7 +358,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | Storage | Only ciphertext and index columns are stored. `seq` keeps counting across restarts. A corrupt database is set aside and recreated; if storage can't be opened at all, the SDK falls back to memory and reports it. |
 | Upload triggers | Interval, size threshold, app resume, connectivity restored, `flush()`, and once at start. One cycle runs at a time. Offline cycles are skipped without using an attempt. |
 | Retries | Exponential backoff with jitter. After 5 failed attempts an envelope becomes a dead letter, retried once per app start and kept for 7 days. |
-| Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads until the next `init`; data is kept. `413` → halve the request. `429` → wait for `Retry-After`. Redirects (`3xx`, or one the browser followed) are never followed and count as a failure, so the key and envelopes never go elsewhere and a redirected `202` is never trusted. A response body over 256 KB is not read and counts as a failure. Anything else → retry later. |
+| Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads, then probe again by itself: after 1 h when the answer has a JSON object body (the ingest server's own), after 5 min otherwise (a captive portal, WAF or misrouted CDN), doubling on each repeat up to 12 h; data is kept and no attempt is counted. **Servers should answer 401/403 with a JSON body** such as `{"error":"invalid_api_key"}`. `413` → halve the request. `429` → wait for `Retry-After`. Redirects (`3xx`, or one the browser followed) are never followed and count as a failure, so the key and envelopes never go elsewhere and a redirected `202` is never trusted. A response body over 256 KB is not read and counts as a failure. Anything else → retry later. |
 | Dio interceptor | One `network` event per call, masked: URL, headers, bodies (JSON keys, form fields, bearer tokens), status and duration. Levels: 2xx is `debug`, 4xx is `warning`, and 5xx or no response is `error`. |
 | Web page exit | `visibilitychange` (hidden) and `pagehide` seal the queue synchronously into `localStorage`. The spill moves to IndexedDB at once, or at the next start. At recovery, entries are checked (format, sizes, consistent index columns, key matching the batch id) and only the configured project's, not dated more than a day ahead, and at most the newest 200 are kept; the rest are dropped and counted in `spillEntriesRejected`. **The spill is not tamper-proof:** any script on your origin (an XSS payload, a compromised third-party script) can read, delete or add entries. It holds only ciphertext, so it cannot read logs, but it can suppress them or add envelopes built with the public key. |
 | Lifecycle | `init` is idempotent; to change the config, call `dispose` then `init`. Calls made before `init` finishes are dropped. |
@@ -372,7 +372,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `partial` | Some envelopes were acknowledged and some were not. |
 | `failed` | Nothing was acknowledged. |
 | `skipped` | Nothing was attempted: nothing pending, disabled, offline, a backoff wait, or another cycle already sent it. |
-| `unauthorized` | The server rejected the API key (401 or 403). Uploads are paused until the next `init`. |
+| `unauthorized` | The server rejected the API key (401 or 403). Uploads are paused and retried by themselves after 1 h (5 min if the answer was not the ingest server's JSON), doubling up to 12 h. |
 
 ### `DiagnosticSnapshot`
 
@@ -398,7 +398,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | Invalid public key | `StateError('Invalid publicKeyPem: …')`, without the key material | stays uninitialized; nothing is ever stored |
 | SQLite or IndexedDB can't be opened | the storage error | continues with memory storage |
 | A batch can't be sealed | the crypto error | drops that batch and counts it |
-| `401` or `403` from the server | one `StateError`, without the API key | pauses uploads; keeps the data |
+| `401` or `403` from the server | one `StateError` per episode, without the API key, saying when it retries | pauses uploads and probes again later; keeps the data |
 | A callback of yours throws | your error | carries on |
 
 **Never-throw guarantees:**

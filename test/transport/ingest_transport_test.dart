@@ -191,6 +191,59 @@ void main() {
       });
     }
 
+    test(
+      'L7: a 401/403 is the ingest server\'s only with a JSON body',
+      () async {
+        Future<IngestUnauthorized> answer(
+          int status,
+          String body,
+          String type,
+        ) async {
+          final adapter = FakeHttpClientAdapter()
+            ..enqueue(
+              FakeResponse(
+                status,
+                body: body,
+                headers: {
+                  'content-type': [type],
+                },
+              ),
+            );
+          return await _transport(adapter).send([makeEnvelope()])
+              as IngestUnauthorized;
+        }
+
+        expect(
+          (await answer(
+            401,
+            '{"error":"invalid_api_key"}',
+            'application/json',
+          )).fromIngestServer,
+          isTrue,
+        );
+        expect(
+          (await answer(
+            403,
+            '<html>Sign in to Wi-Fi</html>',
+            'text/html',
+          )).fromIngestServer,
+          isFalse,
+        );
+        expect(
+          (await answer(401, '', 'application/json')).fromIngestServer,
+          isFalse,
+        );
+        expect(
+          (await answer(401, '["x"]', 'application/json')).fromIngestServer,
+          isFalse,
+        );
+        expect(
+          (await answer(401, '{"a":1}', 'text/plain')).fromIngestServer,
+          isFalse,
+        );
+      },
+    );
+
     test('statuses map to outcomes', () async {
       Future<IngestOutcome> run(int status) async {
         final adapter = FakeHttpClientAdapter()..enqueue(FakeResponse(status));

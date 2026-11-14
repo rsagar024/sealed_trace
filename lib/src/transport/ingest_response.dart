@@ -41,10 +41,15 @@ final class IngestAccepted extends IngestOutcome {
 /// HTTP 401 or 403: the API key is invalid or revoked.
 final class IngestUnauthorized extends IngestOutcome {
   /// Creates the outcome.
-  const IngestUnauthorized(this.status);
+  const IngestUnauthorized(this.status, {this.fromIngestServer = true});
 
   /// 401 or 403.
   final int status;
+
+  /// Whether the answer looks like the ingest server's own: a JSON object
+  /// body. A captive portal, WAF or misrouted CDN usually answers with HTML
+  /// or nothing, and is retried much sooner.
+  final bool fromIngestServer;
 }
 
 /// HTTP 413: the request was too large.

@@ -197,6 +197,18 @@ class IngestTransport implements IngestClient {
     return utf8.decode(bytes.takeBytes(), allowMalformed: true);
   }
 
+  /// Whether [text] is a JSON object served as JSON, as the ingest server's
+  /// own error answers are.
+  static bool _isJsonObject(Response<ResponseBody> response, String text) {
+    final type = response.headers.value(Headers.contentTypeHeader) ?? '';
+    if (!type.toLowerCase().contains('json')) return false;
+    try {
+      return jsonDecode(text) is Map;
+    } on FormatException {
+      return false;
+    }
+  }
+
   static Future<void> _discard(ResponseBody? body) async {
     if (body == null) return;
     try {
@@ -214,7 +226,10 @@ class IngestTransport implements IngestClient {
             const IngestServerError(202, 'unreadable response body');
       case 401:
       case 403:
-        return IngestUnauthorized(status);
+        return IngestUnauthorized(
+          status,
+          fromIngestServer: _isJsonObject(response, text),
+        );
       case 413:
         return const IngestTooLarge();
       case 429:

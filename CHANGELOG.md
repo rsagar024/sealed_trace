@@ -58,7 +58,9 @@ First release.
   - At most 50 envelopes and 2 MB per request.
   - Rows are deleted only for `accepted` and `duplicate` ids.
   - Retries use backoff with jitter; dead letters after 5 attempts.
-  - 401/403 pause uploads; 413 halves the request; 429 honours `Retry-After`.
+  - 401/403 pause uploads and probe again later (1 h, or 5 min without the
+    server's JSON body, doubling to 12 h); 413 halves the request; 429
+    honours `Retry-After`.
   - Triggers: interval, size threshold, app resume, connectivity restored,
     and manual `flush`.
 - **`SealedTraceInterceptor` for Dio.**
@@ -156,6 +158,12 @@ First release.
   `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
   no longer shows whether a `fatal` occurred. The vectors and their spec are
   updated.
+- **A 401/403 no longer stops uploads for the whole session.** The pause
+  ends by itself and the next cycle probes again: after 1 hour when the
+  answer is the ingest server's (a JSON object body), after 5 minutes when it
+  is not (a captive portal, WAF or misrouted CDN), doubling on each repeat up
+  to 12 hours. A successful upload resets it. No attempt is counted, and the
+  failure is reported once per episode.
 - **Less timing exposure in the crypto.** GHASH's multiply and reduction
   are branch-free (mask-based). On the web every asynchronous seal now uses
   WebCrypto, not only batches over 8 KB. New
