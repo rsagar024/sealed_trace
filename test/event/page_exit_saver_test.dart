@@ -56,6 +56,7 @@ class _BrokenBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) => throw StateError('aes failed');
 }
 

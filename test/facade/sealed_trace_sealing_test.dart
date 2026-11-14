@@ -64,6 +64,7 @@ class _FailingBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) => Future.error(StateError('crypto unavailable'));
 }
 
@@ -282,8 +283,14 @@ class _FlakyBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) {
     if (_shouldFail()) return Future.error(StateError('flaky'));
-    return super.aesGcmEncrypt(key: key, iv: iv, plaintext: plaintext);
+    return super.aesGcmEncrypt(
+      key: key,
+      iv: iv,
+      plaintext: plaintext,
+      aad: aad,
+    );
   }
 }

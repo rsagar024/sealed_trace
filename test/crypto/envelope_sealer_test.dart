@@ -101,7 +101,7 @@ void main() {
       'tag',
       'ciphertext',
     ]);
-    expect(wire['v'], 1);
+    expect(wire['v'], 2);
     expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
     expect(wire['createdAt'], '2026-01-01T10:00:05.000Z');
     expect(base64.decode(wire['iv'] as String), hasLength(12));
@@ -170,6 +170,7 @@ void main() {
       Uint8List? tag,
       Uint8List? ciphertext,
       Uint8List? wrappedKey,
+      Uint8List? aad,
     }) async {
       await expectLater(
         openFields(
@@ -177,6 +178,7 @@ void main() {
           iv: iv ?? e.iv,
           tag: tag ?? e.tag,
           ciphertext: ciphertext ?? e.ciphertext,
+          aad: aad ?? e.aad,
         ),
         throwsA(anything),
       );
@@ -202,6 +204,99 @@ void main() {
     test('wrapped key', () async {
       final e = await _sealer().seal([_record(seq: 1)]);
       await expectFails(e, wrappedKey: flip(e.wrappedKey, 10));
+    });
+  });
+
+  group('M1: the clear header is authenticated (AAD)', () {
+    Map<String, dynamic> tampered(
+      Map<String, dynamic> wire,
+      String field,
+      Object value,
+    ) => <String, dynamic>{...wire, field: value};
+
+    Future<void> expectWireFails(Map<String, dynamic> wire) async {
+      await expectLater(openWire(wire), throwsA(anything));
+    }
+
+    test('the untouched wire envelope opens', () async {
+      final e = await _sealer().seal([_record(seq: 1), _record(seq: 2)]);
+      final wire = e.toWireJson();
+      expect(wire['v'], 2);
+      expect(await openWire(wire), startsWith('['));
+    });
+
+    test('a re-sent envelope under a new batchId fails', () async {
+      final wire = (await _sealer().seal([_record(seq: 1)])).toWireJson();
+      await expectWireFails(
+        tampered(wire, 'batchId', '00000000-0000-4000-8000-000000000000'),
+      );
+    });
+
+    test('changing projectId, createdAt, eventCount or alg fails', () async {
+      final wire = (await _sealer().seal([_record(seq: 1)])).toWireJson();
+      await expectWireFails(
+        tampered(wire, 'projectId', '11111111-1111-4111-8111-111111111111'),
+      );
+      await expectWireFails(
+        tampered(wire, 'createdAt', '2020-01-01T00:00:00.000Z'),
+      );
+      await expectWireFails(tampered(wire, 'eventCount', 99));
+      await expectWireFails(tampered(wire, 'alg', 'RSA-OAEP-4096+AES-GCM'));
+    });
+
+    test('decrypting without AAD (the v1 way) fails', () async {
+      final e = await _sealer().seal([_record(seq: 1)]);
+      await expectLater(
+        openFields(
+          wrappedKey: e.wrappedKey,
+          iv: e.iv,
+          tag: e.tag,
+          ciphertext: e.ciphertext,
+          aad: Uint8List(0),
+        ),
+        throwsA(anything),
+      );
+    });
+
+    test('sealSync authenticates the same header', () async {
+      final e = _sealer().sealSync([_record(seq: 1)]);
+      expect(await openEnvelope(e), startsWith('['));
+      await expectWireFails(tampered(e.toWireJson(), 'eventCount', 2));
+    });
+
+    test('the AAD encoding is the documented six lines', () {
+      final aad = envelopeAad(
+        projectId: 'p-1',
+        batchId: 'b-1',
+        createdAt: '2026-01-01T10:00:05.000Z',
+        eventCount: 3,
+      );
+      expect(
+        utf8.decode(aad),
+        'sealed_trace.envelope.v2\n'
+        'RSA-OAEP-2048-SHA256+AES-256-GCM\n'
+        'p-1\n'
+        'b-1\n'
+        '2026-01-01T10:00:05.000Z\n'
+        '3',
+      );
+    });
+
+    test('a field with a line break is refused', () {
+      expect(
+        () => envelopeAad(
+          projectId: 'p\nx',
+          batchId: 'b',
+          createdAt: 'c',
+          eventCount: 1,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('the envelope aad getter matches its wire fields', () async {
+      final e = await _sealer().seal([_record(seq: 1)]);
+      expect(e.aad, wireAad(e.toWireJson()));
     });
   });
 
@@ -338,6 +433,7 @@ class _BrokenBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) => Future.error(StateError('crypto unavailable'));
 }
 
@@ -347,5 +443,6 @@ class _ShortTagBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) async => AesGcmResult(Uint8List(plaintext.length), Uint8List(8));
 }

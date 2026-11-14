@@ -15,6 +15,7 @@ import 'package:sealed_trace/src/crypto/public_key_parser.dart';
 import 'package:sealed_trace/src/crypto/rsa_oaep.dart';
 import 'package:sealed_trace/src/event/log_record.dart';
 import 'package:sealed_trace/src/model/log_level.dart';
+import 'package:sealed_trace/src/model/sealed_envelope.dart';
 import 'package:sealed_trace/src/platform/clock.dart';
 
 import '../../test/helpers/test_keys.dart';
@@ -109,6 +110,7 @@ Future<Map<String, dynamic>> _envelopeCase(
     'aesKeyBase64': _b64(key),
     'plaintextJson': jsonEncode([for (final r in records) r.toJson()]),
     'envelope': envelope.toWireJson(),
+    'aadUtf8': utf8.decode(envelope.aad),
     'index': <String, dynamic>{
       'eventCount': envelope.eventCount,
       'seqMin': envelope.seqMin,
@@ -287,7 +289,7 @@ Future<void> main() async {
 
   final document = <String, dynamic>{
     'description': <String>[
-      'Golden test vectors for the sealed_trace envelope format (v1).',
+      'Golden test vectors for the sealed_trace envelope format (v2).',
       'TEST ONLY: the private key below is published on purpose and protects nothing.',
       'RSA-OAEP is randomized, so wrappedKey differs on every encryption. '
           'Verify envelopes by DECRYPTING them, not by comparing wrappedKey bytes.',
@@ -303,8 +305,15 @@ Future<void> main() async {
           'keys in the order id, seq, ts, level, tag, message, error, stackTrace, '
           'metadata, sessionId, userId, ctx; non-ASCII characters are not escaped).',
       'aes':
-          'AES-256-GCM, 32-byte random key, 12-byte random IV, no additional '
-          'authenticated data, 16-byte tag stored separately from the ciphertext.',
+          'AES-256-GCM, 32-byte random key, 12-byte random IV, 16-byte tag '
+          'stored separately from the ciphertext. Envelopes authenticate the '
+          'additional data described under "aad"; aesGcmCases use none.',
+      'aad':
+          'UTF-8 bytes of six lines joined by a single LF (0x0A), no trailing '
+          'LF: "sealed_trace.envelope.v2", then alg, projectId, batchId, '
+          'createdAt and eventCount exactly as they appear in the wire JSON '
+          '(eventCount in decimal). Rebuild it from the received fields; any '
+          'change to them makes the tag check fail. v1 envelopes had no AAD.',
       'rsa':
           'RSA-OAEP over the 32-byte AES key: 2048-bit key, SHA-256 label hash, '
           'MGF1 with SHA-256, empty label. wrappedKey is 256 bytes.',
@@ -330,6 +339,7 @@ Future<void> main() async {
       'privateKeyPkcs8': testPrivateKeyPkcs8,
     },
     'projectId': _projectId,
+    'envelopeVersion': envelopeVersion,
     'aesGcmCases': aesCases,
     'envelopes': envelopes,
     'rsaOaepWrapCases': wrapCases,

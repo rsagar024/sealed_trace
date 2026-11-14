@@ -52,12 +52,42 @@ for (const c of doc.rsaOaepWrapCases || []) {
   }
 }
 
+// The additional authenticated data, rebuilt from the clear header fields
+// exactly as a server would (see specification.aad).
+function envelopeAad(e) {
+  return Buffer.from(
+    ['sealed_trace.envelope.v2', e.alg, e.projectId, e.batchId, e.createdAt,
+      String(e.eventCount)].join('\n'),
+    'utf8',
+  );
+}
+
+function openEnvelope(e, key, aad) {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(e.iv, 'base64'));
+  decipher.setAAD(aad);
+  decipher.setAuthTag(Buffer.from(e.tag, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(e.ciphertext, 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+function fails(fn) {
+  try {
+    fn();
+    return false;
+  } catch (_) {
+    return true;
+  }
+}
+
 for (const c of doc.envelopes) {
   const e = c.envelope;
   const wire = ['v', 'batchId', 'projectId', 'createdAt', 'eventCount', 'alg',
     'wrappedKey', 'iv', 'tag', 'ciphertext'];
   check(`${c.name}: wire keys`, JSON.stringify(Object.keys(e)) === JSON.stringify(wire));
-  check(`${c.name}: v and alg`, e.v === 1 && e.alg === 'RSA-OAEP-2048-SHA256+AES-256-GCM');
+  check(`${c.name}: v and alg`, e.v === 2 && e.alg === 'RSA-OAEP-2048-SHA256+AES-256-GCM');
+  check(`${c.name}: aadUtf8 matches the rebuilt AAD`, envelopeAad(e).toString('utf8') === c.aadUtf8);
 
   const iv = Buffer.from(e.iv, 'base64');
   const tag = Buffer.from(e.tag, 'base64');
@@ -77,17 +107,25 @@ for (const c of doc.envelopes) {
   check(`${c.name}: unwrap key`, key.toString('base64') === c.aesKeyBase64);
 
   try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    const plain = Buffer.concat([
-      decipher.update(Buffer.from(e.ciphertext, 'base64')),
-      decipher.final(),
-    ]).toString('utf8');
+    const plain = openEnvelope(e, key, envelopeAad(e));
     check(`${c.name}: decrypt`, plain === c.plaintextJson);
     check(`${c.name}: plaintext is a JSON array of ${e.eventCount}`,
       Array.isArray(JSON.parse(plain)) && JSON.parse(plain).length === e.eventCount);
   } catch (err) {
     check(`${c.name}: decrypt`, false, err.message);
+  }
+
+  // M1: any change to the clear header must break decryption.
+  check(`${c.name}: no AAD fails`, fails(() => openEnvelope(e, key, Buffer.alloc(0))));
+  for (const [field, value] of [
+    ['batchId', '00000000-0000-4000-8000-000000000000'],
+    ['projectId', '11111111-1111-4111-8111-111111111111'],
+    ['createdAt', '2020-01-01T00:00:00.000Z'],
+    ['eventCount', e.eventCount + 1],
+  ]) {
+    const forged = { ...e, [field]: value };
+    check(`${c.name}: changed ${field} fails`,
+      fails(() => openEnvelope(forged, key, envelopeAad(forged))));
   }
 }
 

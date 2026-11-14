@@ -64,7 +64,7 @@ void main() {
       test(c['name'] as String, () async {
         final wire = (c['envelope'] as Map).cast<String, dynamic>();
 
-        expect(wire['v'], 1);
+        expect(wire['v'], 2);
         expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
         expect(_b64(wire['iv'] as String), hasLength(12));
         expect(_b64(wire['tag'] as String), hasLength(16));

@@ -399,7 +399,7 @@ void main() {
       'tag',
       'ciphertext',
     });
-    expect(e['v'], 1);
+    expect(e['v'], 2);
     expect(e['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
     expect(e['projectId'], 'proj-c');
     expect(e['eventCount'], 2);

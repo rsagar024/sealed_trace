@@ -2,10 +2,60 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 /// The only envelope version this SDK produces.
-const int envelopeVersion = 1;
+///
+/// Version 2 authenticates the clear header fields as AES-GCM additional
+/// authenticated data (see [envelopeAad]). Version 1 had no AAD.
+const int envelopeVersion = 2;
 
 /// The fixed algorithm identifier carried by every envelope.
 const String envelopeAlgorithm = 'RSA-OAEP-2048-SHA256+AES-256-GCM';
+
+/// First line of the additional authenticated data, for domain separation.
+const String envelopeAadTag = 'sealed_trace.envelope.v2';
+
+/// The AES-GCM additional authenticated data for an envelope's header.
+///
+/// UTF-8 bytes of six lines joined by a single LF (`0x0A`, no trailing LF):
+/// [envelopeAadTag], `alg`, `projectId`, `batchId`, `createdAt` and
+/// `eventCount`, each exactly as it appears in the wire JSON (`createdAt` as
+/// the ISO-8601 string, `eventCount` in decimal). A server rebuilds it from
+/// the received fields, so changing any of them makes decryption fail.
+///
+/// Throws [ArgumentError] if a field contains a line break, which would make
+/// the encoding ambiguous.
+Uint8List envelopeAad({
+  required String projectId,
+  required String batchId,
+  required String createdAt,
+  required int eventCount,
+  String algorithm = envelopeAlgorithm,
+}) {
+  for (final (name, value) in [
+    ('projectId', projectId),
+    ('batchId', batchId),
+    ('createdAt', createdAt),
+  ]) {
+    if (value.contains('\n') || value.contains('\r')) {
+      throw ArgumentError.value(value, name, 'must not contain a line break');
+    }
+  }
+  return Uint8List.fromList(
+    utf8.encode(
+      [
+        envelopeAadTag,
+        algorithm,
+        projectId,
+        batchId,
+        createdAt,
+        '$eventCount',
+      ].join('\n'),
+    ),
+  );
+}
+
+/// The wire form of a `createdAt` time: UTC ISO-8601 with milliseconds.
+String envelopeCreatedAt(DateTime createdAt) =>
+    createdAt.toUtc().toIso8601String();
 
 /// An encrypted batch of events plus the clear index data stored beside it.
 ///
@@ -77,12 +127,20 @@ class SealedEnvelope {
   int get storedBytes =>
       wrappedKey.length + iv.length + tag.length + ciphertext.length;
 
+  /// The additional authenticated data this envelope was sealed with.
+  Uint8List get aad => envelopeAad(
+    projectId: projectId,
+    batchId: batchId,
+    createdAt: envelopeCreatedAt(createdAt),
+    eventCount: eventCount,
+  );
+
   /// The wire form defined by the envelope format (section 7).
   Map<String, dynamic> toWireJson() => <String, dynamic>{
     'v': envelopeVersion,
     'batchId': batchId,
     'projectId': projectId,
-    'createdAt': createdAt.toUtc().toIso8601String(),
+    'createdAt': envelopeCreatedAt(createdAt),
     'eventCount': eventCount,
     'alg': envelopeAlgorithm,
     'wrappedKey': base64Encode(wrappedKey),

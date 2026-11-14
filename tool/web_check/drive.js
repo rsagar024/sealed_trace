@@ -289,6 +289,12 @@ function decrypt(wire) {
     Buffer.from(wire.wrappedKey, 'base64'),
   );
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wire.iv, 'base64'));
+  // v2: the clear header is authenticated as AAD (see the vectors' spec).
+  decipher.setAAD(Buffer.from(
+    ['sealed_trace.envelope.v2', wire.alg, wire.projectId, wire.batchId, wire.createdAt,
+      String(wire.eventCount)].join(String.fromCharCode(10)),
+    'utf8',
+  ));
   decipher.setAuthTag(Buffer.from(wire.tag, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(wire.ciphertext, 'base64')), decipher.final()]);
 }
@@ -331,7 +337,7 @@ function checkMain(lines) {
       const plain = decrypt(e.wire);
       ok =
         crypto.createHash('sha256').update(plain).digest('base64') === e.plainHash &&
-        e.wire.v === 1 &&
+        e.wire.v === 2 &&
         e.wire.alg === 'RSA-OAEP-2048-SHA256+AES-256-GCM';
     } catch (err) {
       console.log(`  decrypt error: ${err.message}`);

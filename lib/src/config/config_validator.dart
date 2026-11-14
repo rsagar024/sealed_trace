@@ -7,6 +7,9 @@ abstract final class ConfigValidator {
     final problems = <String>[];
     if (config.projectId.trim().isEmpty) {
       problems.add('projectId must not be empty');
+    } else if (_controlChars.hasMatch(config.projectId)) {
+      // It is part of the envelope's authenticated header (M1).
+      problems.add('projectId must not contain control characters');
     }
     if (config.apiKey.trim().isEmpty) {
       problems.add('apiKey must not be empty');
@@ -32,6 +35,8 @@ abstract final class ConfigValidator {
     }
     return problems;
   }
+
+  static final RegExp _controlChars = RegExp(r'[\x00-\x1f\x7f]');
 
   static final RegExp _envName = RegExp(r'^[a-z0-9][a-z0-9_-]{0,31}$');
 

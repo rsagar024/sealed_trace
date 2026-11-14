@@ -47,9 +47,15 @@ Uint8List gcmDecrypt({
   required Uint8List iv,
   required Uint8List ciphertext,
   required Uint8List tag,
+  Uint8List? aad,
 }) {
   final (plain, _) = AesGcm256.encrypt(key: key, iv: iv, plaintext: ciphertext);
-  final (_, expected) = AesGcm256.encrypt(key: key, iv: iv, plaintext: plain);
+  final (_, expected) = AesGcm256.encrypt(
+    key: key,
+    iv: iv,
+    plaintext: plain,
+    aad: aad,
+  );
   var diff = tag.length ^ expected.length;
   for (var i = 0; i < tag.length && i < expected.length; i++) {
     diff |= tag[i] ^ expected[i];
@@ -64,10 +70,26 @@ Future<Uint8List> openFields({
   required Uint8List iv,
   required Uint8List tag,
   required Uint8List ciphertext,
+  required Uint8List aad,
 }) async {
   final key = unwrapKey(wrappedKey);
-  return gcmDecrypt(key: key, iv: iv, ciphertext: ciphertext, tag: tag);
+  return gcmDecrypt(
+    key: key,
+    iv: iv,
+    ciphertext: ciphertext,
+    tag: tag,
+    aad: aad,
+  );
 }
+
+/// The AAD a server rebuilds from a wire envelope's clear header fields.
+Uint8List wireAad(Map<String, dynamic> wire) => envelopeAad(
+  projectId: wire['projectId'] as String,
+  batchId: wire['batchId'] as String,
+  createdAt: wire['createdAt'] as String,
+  eventCount: wire['eventCount'] as int,
+  algorithm: wire['alg'] as String,
+);
 
 /// Decrypts a [SealedEnvelope] to its plaintext JSON array text.
 Future<String> openEnvelope(SealedEnvelope envelope) async => utf8.decode(
@@ -76,6 +98,7 @@ Future<String> openEnvelope(SealedEnvelope envelope) async => utf8.decode(
     iv: envelope.iv,
     tag: envelope.tag,
     ciphertext: envelope.ciphertext,
+    aad: envelope.aad,
   ),
 );
 
@@ -86,5 +109,6 @@ Future<String> openWire(Map<String, dynamic> wire) async => utf8.decode(
     iv: base64.decode(wire['iv'] as String),
     tag: base64.decode(wire['tag'] as String),
     ciphertext: base64.decode(wire['ciphertext'] as String),
+    aad: wireAad(wire),
   ),
 );

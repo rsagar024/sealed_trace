@@ -37,7 +37,9 @@ First release.
 - **Hybrid encryption per batch.**
   - AES-256-GCM with a fresh key, wrapped with the project's RSA-2048 public
     key (RSA-OAEP, SHA-256).
-  - Envelope format v1, with known-answer vectors in
+  - Envelope format v2: the clear header (`alg`, `projectId`, `batchId`,
+    `createdAt`, `eventCount`) is authenticated as AES-GCM AAD. Known-answer
+    vectors in
     `test/vectors/envelope_vectors.json`.
   - Large batches are sealed in a background isolate on native platforms.
 - **Offline storage of ciphertext only.**
@@ -79,3 +81,10 @@ First release.
   `Proxy-Authorization`, `X-Auth-Token`, `X-CSRF-Token`,
   `X-Amz-Security-Token`, `X-Goog-Api-Key` and similar. Text bodies use the
   same key rules as JSON.
+- **Envelope header is authenticated (format v2).** The header fields sent in
+  clear are bound to the ciphertext as AES-GCM additional authenticated
+  data, so a captured envelope cannot be replayed under a new `batchId`
+  (bypassing deduplication) or filed under another `projectId`, `createdAt`
+  or `eventCount` without failing decryption. **Servers must decrypt v2
+  with the AAD**; see the README and `test/vectors/envelope_vectors.json`.
+  A `projectId` containing control characters is now rejected.

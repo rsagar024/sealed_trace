@@ -594,7 +594,7 @@ sequenceDiagram
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "batchId": "uuid-v4",
   "projectId": "my-project",
   "createdAt": "2026-01-01T10:00:00.000Z",
@@ -610,7 +610,8 @@ sequenceDiagram
 | Item | Value |
 |---|---|
 | Plaintext | Compact JSON array of events, UTF-8. |
-| AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, no AAD, 16-byte tag stored separately. |
+| AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, 16-byte tag stored separately. |
+| AAD | The clear header is authenticated. AAD = UTF-8 of six lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v2`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt` or `eventCount`, fails decryption. |
 | Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label; `wrappedKey` is 256 bytes. |
 | Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout. |
 | Response | `202` with `accepted`, `duplicate` and `rejected[{batchId, reason}]`; unknown fields are ignored. |
@@ -680,7 +681,8 @@ The integration test runs **offline**: it uploads to a mock ingest server plugge
 - **1.0.0 is the first release.** There is nothing to migrate from.
 - The version follows semantic versioning: the public API in `package:sealed_trace/sealed_trace.dart` is stable within
   1.x, and breaking changes will come as 2.0.0.
-- The envelope format is `v: 1`. A future format change will bump `v`, and servers should check it.
+- The envelope format is `v: 2` (v1 had no AAD). Servers must check `v` and decrypt with the AAD above;
+  a v1-only server rejects every v2 envelope.
 
 <a id="development"></a>
 

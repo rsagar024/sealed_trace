@@ -132,6 +132,17 @@ void main() {
     });
   });
 
+  test(
+    'rejects a projectId with control characters (M1: it is in the AAD)',
+    () {
+      for (final id in ['proj\nx', 'proj\rx', 'proj\tx', 'p\u0000']) {
+        expect(ConfigValidator.validate(_valid.copyWith(projectId: id)), [
+          'projectId must not contain control characters',
+        ], reason: id);
+      }
+    },
+  );
+
   test('rejects non-PEM keys', () {
     for (final pem in ['', 'not a key', '-----BEGIN PRIVATE KEY-----']) {
       expect(
