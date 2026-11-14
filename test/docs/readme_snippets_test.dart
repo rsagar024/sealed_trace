@@ -26,7 +26,7 @@ Future<void> quickStart() async {
     const SealedTraceConfig(
       baseUrl: 'https://logs.example.com',
       projectId: 'my-project',
-      apiKey: 'sk_live_…',
+      apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
       publicKeyPem: projectPublicKeyPem,
       appName: 'shop',
       env: SealedTraceEnv.prod,
@@ -176,7 +176,8 @@ void main() {
       const SealedTraceConfig(
         baseUrl: 'https://logs.example.com',
         projectId: 'my-project',
-        apiKey: 'sk_live_…',
+        apiKey:
+            'pk_live_…', // publishable: identifies the project, not a secret
         publicKeyPem: projectPublicKeyPem,
         appName: 'shop',
       ),

@@ -83,6 +83,14 @@ final class IngestNetworkError extends IngestOutcome {
   final String description;
 }
 
+/// No request was sent because `UploadConfig.attestationTokenProvider` gave
+/// no usable token. Retried with backoff; no attempt counts, because the
+/// server never saw the envelopes.
+final class IngestAttestationUnavailable extends IngestOutcome {
+  /// Creates the outcome.
+  const IngestAttestationUnavailable();
+}
+
 /// The request exceeded the time limit. Retryable.
 final class IngestTimeout extends IngestOutcome {
   /// Creates the outcome.

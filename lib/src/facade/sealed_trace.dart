@@ -398,6 +398,8 @@ abstract final class SealedTrace {
                       overrides?.httpClientAdapter ??
                       clamped.uploadConfig.httpClientAdapter,
                   clock: overrides?.clock ?? const SystemClock(),
+                  attestationTokenProvider:
+                      clamped.uploadConfig.attestationTokenProvider,
                 ),
             config: clamped.uploadConfig,
             counters: counters,

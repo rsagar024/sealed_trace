@@ -1,5 +1,8 @@
 import 'package:dio/dio.dart' show HttpClientAdapter;
 
+/// Returns an app-attestation token for one upload request, or null.
+typedef AttestationTokenProvider = Future<String?> Function();
+
 /// Configures when and how sealed envelopes are uploaded.
 class UploadConfig {
   /// Creates an upload configuration.
@@ -14,6 +17,7 @@ class UploadConfig {
     this.uploadOnResume = true,
     this.uploadOnConnectivityRestored = true,
     this.httpClientAdapter,
+    this.attestationTokenProvider,
   });
 
   /// Period of the scheduled upload cycle.
@@ -52,6 +56,20 @@ class UploadConfig {
   /// Compared by identity.
   final HttpClientAdapter? httpClientAdapter;
 
+  /// Supplies an app-attestation token, sent with every upload as the
+  /// `X-SealedTrace-Attestation` header so the server can check that the
+  /// request comes from your genuine app, not just from someone holding the
+  /// (extractable) API key. Typical sources are Firebase App Check, Play
+  /// Integrity or App Attest.
+  ///
+  /// Called once per upload request, within `requestTimeout`. If it throws,
+  /// times out, or returns null, an empty value or a value with a line break,
+  /// the request is **not** sent. The cycle is retried with backoff, and no
+  /// upload attempt is counted, so envelopes are never dead-lettered because
+  /// of it (retention limits still apply). The token is never logged.
+  /// Compared by identity.
+  final AttestationTokenProvider? attestationTokenProvider;
+
   /// Returns a copy with the given fields replaced.
   UploadConfig copyWith({
     Duration? interval,
@@ -64,6 +82,7 @@ class UploadConfig {
     bool? uploadOnResume,
     bool? uploadOnConnectivityRestored,
     HttpClientAdapter? httpClientAdapter,
+    AttestationTokenProvider? attestationTokenProvider,
   }) {
     return UploadConfig(
       interval: interval ?? this.interval,
@@ -77,6 +96,8 @@ class UploadConfig {
       uploadOnConnectivityRestored:
           uploadOnConnectivityRestored ?? this.uploadOnConnectivityRestored,
       httpClientAdapter: httpClientAdapter ?? this.httpClientAdapter,
+      attestationTokenProvider:
+          attestationTokenProvider ?? this.attestationTokenProvider,
     );
   }
 
@@ -92,7 +113,8 @@ class UploadConfig {
       backoffBase == other.backoffBase &&
       uploadOnResume == other.uploadOnResume &&
       uploadOnConnectivityRestored == other.uploadOnConnectivityRestored &&
-      identical(httpClientAdapter, other.httpClientAdapter);
+      identical(httpClientAdapter, other.httpClientAdapter) &&
+      identical(attestationTokenProvider, other.attestationTokenProvider);
 
   @override
   int get hashCode => Object.hash(
@@ -106,5 +128,8 @@ class UploadConfig {
     uploadOnResume,
     uploadOnConnectivityRestored,
     httpClientAdapter == null ? 0 : identityHashCode(httpClientAdapter),
+    attestationTokenProvider == null
+        ? 0
+        : identityHashCode(attestationTokenProvider),
   );
 }

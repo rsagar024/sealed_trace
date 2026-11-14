@@ -59,6 +59,9 @@ First release.
   - Masked URL, headers and bodies, with truncation after masking.
   - Host allowlist; the SDK's own ingest calls are never logged.
   - The request and response are never altered.
+- `UploadConfig.attestationTokenProvider`: an optional app-attestation token
+  (Firebase App Check, Play Integrity, App Attest) sent as
+  `X-SealedTrace-Attestation` with every upload.
 - `UploadConfig.httpClientAdapter`: an optional Dio `HttpClientAdapter` for
   the SDK's own uploads (a proxy, custom certificates, or a mock server; the
   example app uses one).
@@ -88,3 +91,9 @@ First release.
   or `eventCount` without failing decryption. **Servers must decrypt v2
   with the AAD**; see the README and `test/vectors/envelope_vectors.json`.
   A `projectId` containing control characters is now rejected.
+- **The API key is documented as publishable, not secret.** It can be
+  extracted from any app binary, so it cannot prove who sent an envelope.
+  The README's new "Sender authenticity" section lists the server's duties
+  (rate limits per key and IP, treating decrypted content as untrusted, key
+  rotation) and the optional attestation hook. If the attestation provider
+  fails, nothing is sent and no attempt is counted. Examples use `pk_live_…`.

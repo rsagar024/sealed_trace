@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
+import '../config/upload_config.dart' show AttestationTokenProvider;
 import '../model/sealed_envelope.dart';
 import '../platform/clock.dart';
 import 'ingest_response.dart';
@@ -31,8 +32,10 @@ class IngestTransport implements IngestClient {
     this.timeout = const Duration(seconds: 30),
     HttpClientAdapter? adapter,
     this.clock = const SystemClock(),
+    AttestationTokenProvider? attestationTokenProvider,
   }) : uri = ingestUri(baseUrl),
        _apiKey = apiKey,
+       _attestation = attestationTokenProvider,
        _dio = Dio(
          BaseOptions(
            connectTimeout: timeout,
@@ -55,7 +58,13 @@ class IngestTransport implements IngestClient {
   final Clock clock;
 
   final String _apiKey;
+  final AttestationTokenProvider? _attestation;
   final Dio _dio;
+
+  /// Header carrying the token from `UploadConfig.attestationTokenProvider`.
+  static const String attestationHeader = 'X-SealedTrace-Attestation';
+
+  static final RegExp _lineBreak = RegExp(r'[\r\n]');
   CancelToken? _inFlight;
 
   /// The client's Dio, exposed so tests can check it has no interceptors.
@@ -76,6 +85,22 @@ class IngestTransport implements IngestClient {
     _inFlight = token;
     var timedOut = false;
     try {
+      final headers = <String, dynamic>{'X-Api-Key': _apiKey};
+      final attestation = _attestation;
+      if (attestation != null) {
+        final String? value;
+        try {
+          value = await attestation().timeout(timeout);
+        } catch (error) {
+          // Never pass the error on: it may carry the token or its source.
+          return const IngestAttestationUnavailable();
+        }
+        if (value == null || value.isEmpty || _lineBreak.hasMatch(value)) {
+          return const IngestAttestationUnavailable();
+        }
+        headers[attestationHeader] = value;
+      }
+      if (token.isCancelled) return const IngestCancelled();
       final body = jsonEncode(<String, dynamic>{
         'envelopes': <Map<String, dynamic>>[
           for (final envelope in envelopes) envelope.toWireJson(),
@@ -86,10 +111,7 @@ class IngestTransport implements IngestClient {
             uri,
             data: body,
             cancelToken: token,
-            options: Options(
-              contentType: 'application/json',
-              headers: <String, dynamic>{'X-Api-Key': _apiKey},
-            ),
+            options: Options(contentType: 'application/json', headers: headers),
           )
           .timeout(
             timeout,

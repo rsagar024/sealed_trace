@@ -271,6 +271,13 @@ class UploadScheduler {
           _consecutiveFailures++;
           hadFailure = true;
           retryIn = outcome.retryAfter ?? backoff.delay(_consecutiveFailures);
+        case IngestAttestationUnavailable():
+          // Nothing reached the server: back off, but charge no attempt.
+          counters.uploadFailures++;
+          failedIds.addAll(ids);
+          _consecutiveFailures++;
+          hadFailure = true;
+          retryIn = backoff.delay(_consecutiveFailures);
         case IngestServerError():
         case IngestNetworkError():
         case IngestTimeout():
@@ -400,6 +407,9 @@ class UploadScheduler {
         case IngestRateLimited():
           counters.uploadFailures++;
           return outcome.retryAfter ?? backoff.delay(_consecutiveFailures + 1);
+        case IngestAttestationUnavailable():
+          counters.uploadFailures++;
+          return backoff.delay(_consecutiveFailures + 1);
         case IngestTooLarge():
         case IngestServerError():
         case IngestNetworkError():

@@ -7,7 +7,7 @@
 /// await SealedTrace.init(const SealedTraceConfig(
 ///   baseUrl: 'https://logs.example.com',
 ///   projectId: 'my-project',
-///   apiKey: 'sk_live_…',
+///   apiKey: 'pk_live_…',
 ///   publicKeyPem: projectPublicKeyPem,
 ///   appName: 'shop',
 /// ));

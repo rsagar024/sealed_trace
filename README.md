@@ -14,7 +14,7 @@ your SealedTrace server can open, keeps it offline and uploads it reliably, and 
 await SealedTrace.init(const SealedTraceConfig(
   baseUrl: 'https://logs.example.com',
   projectId: 'my-project',
-  apiKey: 'sk_live_…',
+  apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
   publicKeyPem: projectPublicKeyPem,   // RSA-2048, from the SealedTrace console
   appName: 'shop',
 ));
@@ -161,7 +161,7 @@ Two rules to know up front:
      await SealedTrace.init(const SealedTraceConfig(
        baseUrl: 'https://logs.example.com',
        projectId: 'my-project',
-       apiKey: 'sk_live_…',
+       apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
        publicKeyPem: projectPublicKeyPem,
        appName: 'shop',
        env: SealedTraceEnv.prod,
@@ -224,7 +224,7 @@ Two rules to know up front:
 |---|---|---|
 | `baseUrl` | required | Absolute URL of the SealedTrace server. Trailing slashes are ignored. Must be `https` unless `env` is `dev` or `local` or `allowInsecureHttp` is `true`; otherwise the SDK stays disabled and reports the problem. |
 | `projectId` | required | Project the envelopes belong to. |
-| `apiKey` | required | Sent only as the `X-Api-Key` header. |
+| `apiKey` | required | Sent only as the `X-Api-Key` header. A **publishable** identifier: anything compiled into an app can be extracted, so it is not a secret. See [Sender authenticity](#sender-authenticity). |
 | `publicKeyPem` | required | The project's RSA-2048 public key, SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
 | `appName` | required | Your app's name. |
 | `env` | `SealedTraceEnv.prod` | `SealedTraceEnv.dev`, `.staging`, `.prod`, or any environment created on the dashboard, such as `SealedTraceEnv('qa')`. 1–32 chars of `a-z`, `0-9`, `_`, `-`; any other name leaves the SDK disabled. Reported in every event as `ctx.env`. See [Environments & flavors](#environments). |
@@ -273,6 +273,7 @@ The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-A
 | `backoffBase` | 5 s | Retry delay `min(base·2^(n−1), 5 min)`, with jitter between 0.5× and 1×. |
 | `uploadOnResume` | `true` | Upload when the app returns to the foreground. |
 | `uploadOnConnectivityRestored` | `true` | Upload when the network comes back. |
+| `attestationTokenProvider` | `null` | `Future<String?> Function()` returning an app-attestation token (Firebase App Check, Play Integrity, App Attest), sent as `X-SealedTrace-Attestation` with every upload. If it fails or returns nothing, the request is not sent and is retried later; no attempt is counted. See [Sender authenticity](#sender-authenticity). |
 | `httpClientAdapter` | `null` | A Dio `HttpClientAdapter` for the SDK's own uploads: a proxy, custom certificates, or a mock server. Only the connection layer changes; the URL, headers and timeouts stay the same. |
 
 <a id="retentionconfig"></a>
@@ -404,13 +405,40 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 |---|---|---|
 | `baseUrl` | your SealedTrace server | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
 | `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
-| `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. |
+| `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. **Publishable, not secret:** `--dart-define` and obfuscation do not stop extraction. |
 | `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. |
 
 - Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
   data.
 - The example's integration test uses a demo-only public key whose private key was never saved.
+
+<a id="sender-authenticity"></a>
+
+### Sender authenticity
+
+The API key and the public key both ship inside your app, and both can be extracted from the binary (`strings`, a
+Dart snapshot decompiler). Anyone who has them can build envelopes the server will accept. Encryption protects what
+your app sends, but it **does not prove who sent it**. Treat the key as a publishable project identifier (hence
+`pk_…`), and rely on these controls instead:
+
+- **On the server (required):**
+  - Rate-limit and set quotas per API key and per client IP.
+  - Treat every decrypted field as **untrusted input**: escape it when the console renders it (stored XSS), and
+    never use it in queries or commands without validation.
+  - Be able to rotate an environment's key.
+- **App attestation (recommended):** pass `UploadConfig(attestationTokenProvider: ...)` and have the server verify
+  the `X-SealedTrace-Attestation` header with the provider before it accepts a request. For example, with Firebase
+  App Check:
+
+  ```dart
+  uploadConfig: UploadConfig(
+    attestationTokenProvider: () => FirebaseAppCheck.instance.getToken(),
+  ),
+  ```
+
+  Attestation stops casual forgery from scripts and other apps. It cannot stop a rooted device that runs your real
+  app, so keep the server-side controls in place.
 
 <a id="environments"></a>
 
@@ -523,6 +551,8 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   `setUser(name:)` is sent as given in `ctx.userName` and `ctx.userDisplayName`, inside the sealed envelope, so
   the server can show it. Set `MaskConfig(maskUserName: true)` and `sendUserDisplayName: false` to keep it on the
   device.
+- **Logs are not proof of origin.** The API key can be extracted from the app, so without attestation anyone can
+  submit envelopes. See [Sender authenticity](#sender-authenticity).
 - **The crypto has not been audited and is not constant-time.** Every envelope uses a fresh key once, and only the
   public-key operation runs on the device, which limits the exposure but does not remove it.
 

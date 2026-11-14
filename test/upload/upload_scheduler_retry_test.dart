@@ -545,4 +545,44 @@ void main() {
       expect(rig.client.calls, isEmpty);
     });
   });
+
+  group('M2: attestation unavailable', () {
+    test('burns no attempt and retries after a backoff delay', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        rig.client.enqueueOutcome(const IngestAttestationUnavailable());
+
+        final result = awaitFake(
+          async,
+          rig.scheduler.request(UploadTrigger.manual),
+        );
+        expect(result.outcome, UploadOutcome.failed);
+        expect(awaitFake(async, rig.index())['a']!.attempts, 0);
+        expect(rig.counters.uploadFailures, 1);
+
+        async.elapse(const Duration(seconds: 6));
+        expect(rig.client.calls, hasLength(2), reason: 'retried');
+        expect(awaitFake(async, rig.ids()), isEmpty, reason: 'then accepted');
+      });
+    });
+
+    test('never dead-letters, however often it repeats', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        for (var i = 0; i < 12; i++) {
+          rig.client.enqueueOutcome(const IngestAttestationUnavailable());
+        }
+        unawaited(rig.scheduler.request(UploadTrigger.manual));
+        async.elapse(const Duration(hours: 3));
+        final index = awaitFake(async, rig.index());
+        expect(index.containsKey('a') ? index['a']!.attempts : 0, 0);
+        expect(
+          index.values.where((r) => r.uploadState == uploadStateDeadLetter),
+          isEmpty,
+        );
+      });
+    });
+  });
 }

@@ -34,6 +34,10 @@ class SealedTraceConfig {
   final String projectId;
 
   /// Project API key sent as `X-Api-Key`.
+  ///
+  /// A publishable identifier, not a secret: anything compiled into an app
+  /// can be extracted. Rely on server-side rate limits and, optionally,
+  /// `UploadConfig.attestationTokenProvider` to tell genuine apps apart.
   final String apiKey;
 
   /// Project RSA-2048 public key in PEM form. Only the server holds the
