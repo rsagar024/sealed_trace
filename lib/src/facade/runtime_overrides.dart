@@ -30,6 +30,7 @@ class RuntimeOverrides {
     this.network,
     this.newId,
     this.flushInterval,
+    this.purgeInterval,
     this.ingestClient,
     this.httpClientAdapter,
     this.connectivity,
@@ -70,6 +71,10 @@ class RuntimeOverrides {
 
   /// Queue flush interval.
   final Duration? flushInterval;
+
+  /// Retention purge interval, below the 1-minute floor `init` enforces on
+  /// the config.
+  final Duration? purgeInterval;
 
   /// Replaces the whole ingest client.
   final IngestClient? ingestClient;

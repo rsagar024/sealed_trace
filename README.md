@@ -267,13 +267,13 @@ The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-A
 
 | Field | Default | Meaning |
 |---|---|---|
-| `interval` | 15 min | Periodic upload. |
+| `interval` | 15 min | Periodic upload. At least 30 s. |
 | `sizeThresholdEvents` | 200 | Upload once this many events are stored (0 disables the trigger). |
 | `sizeThresholdBytes` | 256 KB | Upload once this many bytes are stored (0 disables the trigger). |
-| `maxAttempts` | 5 | Failed attempts before an envelope is dead-lettered. |
+| `maxAttempts` | 5 | Failed attempts before an envelope is dead-lettered. At least 1. |
 | `batchSize` | 50 | Envelopes per request. Values above 50 are clamped to 50. |
-| `requestTimeout` | 30 s | Per request. |
-| `backoffBase` | 5 s | Retry delay `min(base·2^(n−1), 5 min)`, with jitter between 0.5× and 1×. |
+| `requestTimeout` | 30 s | Per request. At least 1 s. |
+| `backoffBase` | 5 s | Retry delay `min(base·2^(n−1), 5 min)`, with jitter between 0.5× and 1×. At least 1 s. |
 | `uploadOnResume` | `true` | Upload when the app returns to the foreground. |
 | `uploadOnConnectivityRestored` | `true` | Upload when the network comes back. |
 | `pinnedSpkiSha256` | `[]` | Public-key pins for the ingest server: base64 SHA-256 of the certificate's DER `SubjectPublicKeyInfo` (`sha256/` prefix optional). With pins, an upload connects only if the leaf certificate matches one, checked after the TLS handshake and **before** the request is sent. Add a backup pin for your next key. Native only (ignored on the web); needs an https `baseUrl`; not with `httpClientAdapter`; no proxy. Get a pin with `openssl x509 -in cert.pem -pubkey -noout \| openssl pkey -pubin -outform der \| openssl dgst -sha256 -binary \| openssl base64`. |
@@ -286,11 +286,15 @@ The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-A
 
 | Field | Default | Meaning |
 |---|---|---|
-| `maxEvents` | 10 000 | Most events kept on the device. |
-| `maxAgeDays` | 30 | Oldest age kept. |
-| `maxSizeBytes` | 50 MB | Most stored bytes. |
-| `purgeInterval` | 1 h | How often retention runs. It also runs at start and after each upload cycle. |
-| `deadLetterTtl` | 7 days | How long envelopes that gave up are kept. They are retried once per app start. |
+| `maxEvents` | 10 000 | Most events kept on the device. At least 1. |
+| `maxAgeDays` | 30 | Oldest age kept. At least 1. |
+| `maxSizeBytes` | 50 MB | Most stored bytes. At least 64 KB. |
+| `purgeInterval` | 1 h | How often retention runs. It also runs at start and after each upload cycle. At least 1 min. |
+| `deadLetterTtl` | 7 days | How long envelopes that gave up are kept. They are retried once per app start. Not negative. |
+
+Values below these floors are raised by `init`, never rejected: a zero `interval`, `backoffBase` or `purgeInterval`
+would otherwise spin a timer or retry in a storm. Each change is counted in `diagnostics.configValuesAdjusted` and
+printed (through `verboseInternalLogs`, or in debug builds); it does not reach `onException`.
 
 Retention removes the oldest envelopes first. If storage is full, the oldest 20% are purged and the write is retried
 once.
@@ -382,6 +386,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `envelopesDeadLettered` | Envelopes that gave up after `maxAttempts`, or were rejected for good. |
 | `purgedRows` | Envelopes removed by retention. |
 | `internalExceptions` | Errors caught inside the SDK. |
+| `configValuesAdjusted` | Configuration values `init` raised to their floor or clamped (see the upload and retention tables). |
 
 ### What `onException` reports
 

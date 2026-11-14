@@ -129,3 +129,10 @@ First release.
   256 KB of a response body is read. Optional SPKI pinning
   (`pinnedSpkiSha256`) rejects a mismatching server before the API key or
   envelopes are sent.
+- **Timing and retention values are bounded.** `init` raises out-of-range
+  values instead of using them: upload `interval` >= 30 s, `backoffBase`
+  and `requestTimeout` >= 1 s, retention `maxEvents` and `maxAgeDays` >= 1,
+  `maxSizeBytes` >= 64 KB, `purgeInterval` >= 1 min, `deadLetterTtl` >= 0.
+  A zero interval or backoff can no longer spin a timer or cause a retry
+  storm. Each adjustment is counted in `diagnostics.configValuesAdjusted`
+  and printed.

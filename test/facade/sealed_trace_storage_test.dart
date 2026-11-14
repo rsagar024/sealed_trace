@@ -46,12 +46,17 @@ class _SpyAdapter extends MemoryStorageAdapter {
 late Directory _tempRoot;
 final DateTime _fixedNow = DateTime.utc(2026, 6, 1, 12);
 
-void _install({StorageAdapter? storage, RuntimeOverrides? custom}) {
+void _install({
+  StorageAdapter? storage,
+  RuntimeOverrides? custom,
+  Duration? purgeInterval,
+}) {
   SealedTrace.debugOverrides =
       custom ??
       RuntimeOverrides(
         disableUploads: true,
         storage: storage,
+        purgeInterval: purgeInterval,
         lifecycle: FakeLifecycle(),
         deviceContext: testDevice,
         clock: FakeClock(_fixedNow),
@@ -308,14 +313,13 @@ void main() {
 
     test('the periodic timer purges rows that expire later', () async {
       final adapter = MemoryStorageAdapter();
-      _install(storage: adapter);
-      await SealedTrace.init(
-        _config.copyWith(
-          retentionConfig: const RetentionConfig(
-            purgeInterval: Duration(milliseconds: 40),
-          ),
-        ),
+      _install(
+        storage: adapter,
+        purgeInterval: const Duration(milliseconds: 40),
       );
+      // The config's purgeInterval has a 1-minute floor (L2); the test-only
+      // override keeps this test fast.
+      await SealedTrace.init(_config);
       expect(SealedTrace.diagnostics.purgedRows, 0);
 
       await adapter.insertEnvelope(

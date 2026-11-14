@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
@@ -84,6 +85,24 @@ abstract final class SealedTrace {
 
   /// A snapshot of the SDK's internal counters. Never contains log content.
   static DiagnosticSnapshot get diagnostics => _counters.snapshot();
+
+  /// Reports values that `init` clamped: counted in
+  /// [DiagnosticSnapshot.configValuesAdjusted] and printed, through the
+  /// internal logger when it is on and otherwise in debug builds only. They
+  /// are corrections, not errors, so they do not reach [onException].
+  static void _reportAdjustments(List<String> adjusted, bool verbose) {
+    if (adjusted.isEmpty) return;
+    _counters.configValuesAdjusted += adjusted.length;
+    final message = 'config values adjusted: ${adjusted.join('; ')}';
+    if (verbose) {
+      _logger.log(message);
+    } else {
+      assert(() {
+        debugPrint('[sealed_trace] $message');
+        return true;
+      }());
+    }
+  }
 
   /// Initializes the SDK.
   ///
@@ -275,8 +294,10 @@ abstract final class SealedTrace {
         );
         return;
       }
-      final clamped = ConfigValidator.clamp(config);
+      final normalized = ConfigValidator.normalize(config);
+      final clamped = normalized.config;
       _logger = InternalLogger(clamped.verboseInternalLogs);
+      _reportAdjustments(normalized.adjusted, clamped.verboseInternalLogs);
 
       EventPipeline? pipeline;
       PageExitSaver? exitSaver;
@@ -319,7 +340,8 @@ abstract final class SealedTrace {
             onPurged: (n) => counters.purgedRows += n,
             onDeadLettered: (n) => counters.envelopesDeadLettered += n,
           ),
-          purgeInterval: clamped.retentionConfig.purgeInterval,
+          purgeInterval:
+              overrides?.purgeInterval ?? clamped.retentionConfig.purgeInterval,
           clock: overrides?.clock ?? const SystemClock(),
           counters: counters,
           onError: _report,

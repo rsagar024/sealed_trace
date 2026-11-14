@@ -1,5 +1,7 @@
 import '../transport/spki_pin.dart';
+import 'retention_config.dart';
 import 'sealed_trace_config.dart';
+import 'upload_config.dart';
 
 /// Validates and normalizes a [SealedTraceConfig]. Never throws.
 abstract final class ConfigValidator {
@@ -57,20 +59,116 @@ abstract final class ConfigValidator {
 
   static final RegExp _envName = RegExp(r'^[a-z0-9][a-z0-9_-]{0,31}$');
 
-  /// Returns [config] with out-of-range values clamped: `batchSize` to 1..50
-  /// and `maxAttempts` to at least 1.
-  static SealedTraceConfig clamp(SealedTraceConfig config) {
-    final upload = config.uploadConfig;
-    final batchSize = upload.batchSize.clamp(1, 50);
-    final maxAttempts = upload.maxAttempts < 1 ? 1 : upload.maxAttempts;
-    if (batchSize == upload.batchSize && maxAttempts == upload.maxAttempts) {
-      return config;
+  /// Smallest upload [UploadConfig.interval]. A zero or tiny period would
+  /// make the periodic timer spin.
+  static const Duration minUploadInterval = Duration(seconds: 30);
+
+  /// Smallest [UploadConfig.backoffBase]. Zero would retry server errors
+  /// immediately, in a storm.
+  static const Duration minBackoffBase = Duration(seconds: 1);
+
+  /// Smallest [UploadConfig.requestTimeout].
+  static const Duration minRequestTimeout = Duration(seconds: 1);
+
+  /// Smallest [RetentionConfig.purgeInterval]. Zero would spin the purge
+  /// timer.
+  static const Duration minPurgeInterval = Duration(minutes: 1);
+
+  /// Smallest [RetentionConfig.maxSizeBytes]: room for at least one batch.
+  static const int minRetentionBytes = 64 * 1024;
+
+  /// Returns [config] with out-of-range values clamped. See [normalize].
+  static SealedTraceConfig clamp(SealedTraceConfig config) =>
+      normalize(config).config;
+
+  /// Returns [config] with out-of-range values clamped, plus one line per
+  /// value that was changed, for reporting. The same instance is returned
+  /// when nothing changes.
+  ///
+  /// Upload: `batchSize` 1..50, `maxAttempts` >= 1, `interval` >= 30 s,
+  /// `backoffBase` >= 1 s, `requestTimeout` >= 1 s (the size thresholds are
+  /// left alone: 0 or less disables those triggers). Retention: `maxEvents` and `maxAgeDays` >= 1,
+  /// `maxSizeBytes` >= 64 KiB, `purgeInterval` >= 1 min, `deadLetterTtl`
+  /// >= 0.
+  static ({SealedTraceConfig config, List<String> adjusted}) normalize(
+    SealedTraceConfig config,
+  ) {
+    final adjusted = <String>[];
+    int ints(String name, int value, int fixed) {
+      if (value != fixed) adjusted.add('$name $value -> $fixed');
+      return fixed;
     }
-    return config.copyWith(
-      uploadConfig: upload.copyWith(
-        batchSize: batchSize,
-        maxAttempts: maxAttempts,
+
+    int atLeast(String name, int value, int floor) =>
+        ints(name, value, value < floor ? floor : value);
+
+    Duration durationAtLeast(String name, Duration value, Duration floor) {
+      if (value >= floor) return value;
+      adjusted.add('$name $value -> $floor');
+      return floor;
+    }
+
+    final u = config.uploadConfig;
+    final batchSize = ints(
+      'uploadConfig.batchSize',
+      u.batchSize,
+      u.batchSize.clamp(1, 50),
+    );
+    final maxAttempts = atLeast('uploadConfig.maxAttempts', u.maxAttempts, 1);
+    final interval = durationAtLeast(
+      'uploadConfig.interval',
+      u.interval,
+      minUploadInterval,
+    );
+    final backoffBase = durationAtLeast(
+      'uploadConfig.backoffBase',
+      u.backoffBase,
+      minBackoffBase,
+    );
+    final requestTimeout = durationAtLeast(
+      'uploadConfig.requestTimeout',
+      u.requestTimeout,
+      minRequestTimeout,
+    );
+
+    final r = config.retentionConfig;
+    final maxEvents = atLeast('retentionConfig.maxEvents', r.maxEvents, 1);
+    final maxAgeDays = atLeast('retentionConfig.maxAgeDays', r.maxAgeDays, 1);
+    final maxSizeBytes = atLeast(
+      'retentionConfig.maxSizeBytes',
+      r.maxSizeBytes,
+      minRetentionBytes,
+    );
+    final purgeInterval = durationAtLeast(
+      'retentionConfig.purgeInterval',
+      r.purgeInterval,
+      minPurgeInterval,
+    );
+    final deadLetterTtl = durationAtLeast(
+      'retentionConfig.deadLetterTtl',
+      r.deadLetterTtl,
+      Duration.zero,
+    );
+
+    if (adjusted.isEmpty) return (config: config, adjusted: adjusted);
+    return (
+      config: config.copyWith(
+        uploadConfig: u.copyWith(
+          batchSize: batchSize,
+          maxAttempts: maxAttempts,
+          interval: interval,
+          backoffBase: backoffBase,
+          requestTimeout: requestTimeout,
+        ),
+        retentionConfig: r.copyWith(
+          maxEvents: maxEvents,
+          maxAgeDays: maxAgeDays,
+          maxSizeBytes: maxSizeBytes,
+          purgeInterval: purgeInterval,
+          deadLetterTtl: deadLetterTtl,
+        ),
       ),
+      adjusted: adjusted,
     );
   }
 
