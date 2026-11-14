@@ -158,6 +158,13 @@ First release.
   `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
   no longer shows whether a `fatal` occurred. The vectors and their spec are
   updated.
+- **`setContext` is bounded and cannot set the user name.** The context that
+  `setContext` builds up across calls is limited to 100 keys and 16 KB of
+  JSON; entries past a limit are dropped (the old value is kept), counted in
+  `diagnostics.contextEntriesDropped` and reported once per session.
+  `userName`, like `userDisplayName` and the device context keys, is now
+  ignored in `setContext`, so it can no longer bypass masking; only `setUser`
+  sets it.
 - **A 401/403 no longer stops uploads for the whole session.** The pause
   ends by itself and the next cycle probes again: after 1 hour when the
   answer is the ingest server's (a JSON object body), after 5 minutes when it

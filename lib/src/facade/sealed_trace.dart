@@ -12,6 +12,7 @@ import '../crypto/crypto_backend.dart';
 import '../crypto/envelope_sealer.dart';
 import '../crypto/public_key_parser.dart';
 import '../diagnostics/diagnostic_counters.dart';
+import '../event/context_limits.dart';
 import '../diagnostics/internal_logger.dart';
 import '../event/event_builder.dart';
 import '../event/event_pipeline.dart';
@@ -188,12 +189,38 @@ abstract final class SealedTrace {
 
   /// Merges [ctx] into the context attached to every later event.
   ///
+  /// The merged context is bounded (L8): at most 100 keys and 16 KB of
+  /// JSON. A key that would go past either limit is dropped, the existing
+  /// value is kept, the drop is counted in
+  /// [DiagnosticSnapshot.contextEntriesDropped] and the first one in a
+  /// session is reported through [onException]. The SDK's own keys (the
+  /// device context: `appVersion`, `buildNumber`, `platform`, `os`, `locale`,
+  /// `env`, `network`; and `userName` and `userDisplayName`) are ignored; use
+  /// [setUser] for the user's name.
+  ///
   /// No-op before [init].
   static void setContext(Map<String, dynamic> ctx) {
     final runtime = _runtime;
     if (runtime == null) return;
     try {
-      runtime.context.addAll(MetadataNormalizer.normalize(ctx));
+      final dropped = ContextLimits.merge(
+        runtime.context,
+        MetadataNormalizer.normalize(ctx),
+      );
+      if (dropped > 0) {
+        _counters.contextEntriesDropped += dropped;
+        if (!runtime.contextLimitReported) {
+          runtime.contextLimitReported = true;
+          _report(
+            StateError(
+              'setContext dropped $dropped entries: the context is limited '
+              'to ${ContextLimits.maxEntries} keys and '
+              '${ContextLimits.maxChars} JSON characters',
+            ),
+            StackTrace.current,
+          );
+        }
+      }
     } catch (error, stack) {
       _report(error, stack);
     }

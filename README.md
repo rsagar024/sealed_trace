@@ -195,6 +195,10 @@ Two rules to know up front:
 
    - Don't set `platform`, `os`, `appVersion`, `buildNumber`, `locale`, `env` or `network`. The SDK fills them in,
      and its values win over `setContext`.
+   - `userName` and `userDisplayName` passed to `setContext` are ignored: only `setUser` sets them.
+   - The context is limited to 100 keys and 16 KB of JSON in total, across all `setContext` calls. A key past
+     either limit is dropped (the old value stays), counted in `diagnostics.contextEntriesDropped`, and reported
+     once per session through `onException`.
    - Call both after `await SealedTrace.init(...)`. Before init they do nothing.
    - See `_deviceContext()` in
      [`example/lib/main.dart`](https://github.com/rsagar024/sealed_trace/blob/master/example/lib/main.dart) for the
@@ -387,6 +391,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `envelopesDeadLettered` | Envelopes that gave up after `maxAttempts`, or were rejected for good. |
 | `purgedRows` | Envelopes removed by retention. |
 | `internalExceptions` | Errors caught inside the SDK. |
+| `contextEntriesDropped` | `setContext` entries dropped because the context reached 100 keys or 16 KB. |
 | `spillEntriesRejected` | Web page-exit spill entries dropped at recovery: another project's, dated in the future, or over the cap of 200. |
 | `configValuesAdjusted` | Configuration values `init` raised to their floor or clamped (see the upload and retention tables). |
 

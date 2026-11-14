@@ -59,8 +59,12 @@ class Runtime {
   /// cut to length. Null when unset or when `sendUserDisplayName` is false.
   String? userDisplayName;
 
-  /// Extra context merged into every event. Values are already JSON-safe.
+  /// Extra context merged into every event. Values are already JSON-safe,
+  /// and its size is bounded by `ContextLimits`.
   final Map<String, dynamic> context = {};
+
+  /// Whether a `setContext` limit has been reported this session.
+  bool contextLimitReported = false;
 
   /// Builds a record from a call that passed the gate and queues it.
   void record(
