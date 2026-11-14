@@ -179,7 +179,7 @@ abstract final class SealedTrace {
     }
   }
 
-  /// Adds sensitive [keys] to mask, matched case-insensitively.
+  /// Adds sensitive [keys] to mask, matched ignoring case and `_`, `-`, `.`.
   ///
   /// No-op before [init].
   static void addMaskKeys(List<String> keys) {

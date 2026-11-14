@@ -245,15 +245,17 @@ Two rules to know up front:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `extraKeys` | `[]` | More keys whose values are replaced. Matching is exact and case-insensitive on the whole key. |
+| `extraKeys` | `[]` | More keys whose values are replaced. Matching is on the whole key, ignoring case and the separators `_`, `-`, `.` and spaces, so `national_id` also matches `nationalId`. |
 | `extraPatterns` | `[]` | More `RegExp`s applied to every string. |
 | `extraHeaderDenylist` | `[]` | More header names to mask in network logs. |
-| `useDefaultKeys` | `true` | `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `api_key`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `first_name`, `last_name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv` |
-| `useDefaultPatterns` | `true` | Email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. |
+| `useDefaultKeys` | `true` | Exact keys (separators and case ignored): `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv`, `username`, `otp`, `pin`, `mpin`, `cvc`, `session`, `sessionId`, `sid`, `cardNumber`, `ccNumber`, `client_secret`, `authCode`. Plus any key that **contains** `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `apikey`, `privatekey`, `authorization`, `cookie` or `jwt` (`idToken`, `x-csrf-token`, `oldPassword`), or **ends with** `auth` (`oauth`, `basicAuth`; not `author`). |
+| `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens anywhere in a string (messages, JSON values, URLs); email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. |
 | `replacement` | `'***'` | Replacement text. |
 | `maskUserName` | `false` | `true` sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. By default the name is sent as given so the console can show it. |
 
-The headers `Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` are always masked in network logs, even with
+The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
+`X-Access-Token`, `X-Refresh-Token`, `X-Id-Token`, `X-CSRF-Token`, `X-XSRF-Token`, `X-Amz-Security-Token`,
+`X-Goog-Api-Key` and `X-Session-Token` are always masked in network logs, even with
 `useDefaultKeys: false`.
 
 <a id="uploadconfig"></a>
@@ -299,6 +301,10 @@ once.
 | `hostAllowlist` | `[]` | Hosts to log; empty means all. `*.example.com` matches subdomains but not `example.com` itself. |
 | `captureRequestBody` | `true` | Log request bodies. |
 | `captureResponseBody` | `true` | Log response bodies. |
+
+By default bodies are captured for every host. They are masked with the rules above, but a credential in a format
+those rules don't recognise would reach the console. For login, OAuth or third-party APIs, consider a
+`hostAllowlist` or `captureResponseBody: false`.
 
 <a id="api-overview"></a>
 
@@ -509,9 +515,10 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   - Secrets with no recognisable key or scheme are not detected.
   - A 10-digit number starting with 6–9 is treated as an Indian phone number and masked.
   - A long numeric id that happens to pass the Luhn check is masked as a card.
-- **Keys outside the default list are not masked in your own `meta`**, for example `authorization` or `username`. A
-  bearer token you log by hand stays encrypted, but the server sees it. Add such keys with `extraKeys` or
-  `addMaskKeys`. (The Dio interceptor masks credential headers and bearer tokens in bodies on its own.)
+- **Keys that match no default key or fragment are not masked in your own `meta`**, for example `iban` or
+  `nationalId`. Add such keys with `extraKeys` or `addMaskKeys`. JWTs and `Bearer` tokens are masked in every
+  string whatever the key.
+- **Fragment matching can over-mask**: `passwordHint` or `tokenCount` are masked too.
 - **`userId`, `tag` and the device context are never masked.** Don't put personal data in them. A name passed to
   `setUser(name:)` is sent as given in `ctx.userName` and `ctx.userDisplayName`, inside the sealed envelope, so
   the server can show it. Set `MaskConfig(maskUserName: true)` and `sendUserDisplayName: false` to keep it on the

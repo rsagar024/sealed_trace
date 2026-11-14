@@ -72,6 +72,20 @@ String _keepPrefix(Match m, String replacement) => '${m[1]}$replacement';
 ///
 /// Every quantifier is bounded, so matching time is linear in the input.
 List<MaskRule> buildDefaultRules() => <MaskRule>[
+  // JWTs (header.payload.signature, base64url), anywhere in a string: JSON
+  // values, log messages, URL paths. The signature may be empty (alg none).
+  MaskRule(
+    RegExp(
+      r'(^|[^A-Za-z0-9_\-])(eyJ[A-Za-z0-9_\-]{2,8000}\.[A-Za-z0-9_\-]{2,8000}'
+      r'\.[A-Za-z0-9_\-]{0,8000})',
+    ),
+    _keepPrefix,
+  ),
+  // Bearer tokens: the scheme word is kept, the token is replaced.
+  MaskRule(
+    RegExp(r'\b(Bearer)(\s+)[A-Za-z0-9._~+/=\-]{6,2000}', caseSensitive: false),
+    (m, replacement) => '${m[1]}${m[2]}$replacement',
+  ),
   // Email.
   MaskRule(
     RegExp(

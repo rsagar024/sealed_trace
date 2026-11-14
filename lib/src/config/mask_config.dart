@@ -13,7 +13,8 @@ class MaskConfig {
     this.maskUserName = false,
   });
 
-  /// Extra sensitive keys, matched exactly and case-insensitively.
+  /// Extra sensitive keys, matched on the whole key, ignoring case and the
+  /// separators `_`, `-`, `.` and spaces.
   final List<String> extraKeys;
 
   /// Extra patterns whose matches are replaced in every string value.

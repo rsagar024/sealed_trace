@@ -251,4 +251,56 @@ void main() {
       }
     });
   });
+
+  group('H2: credential headers', () {
+    test('the expanded denylist is masked', () {
+      const names = [
+        'Proxy-Authorization',
+        'X-Auth-Token',
+        'X-Access-Token',
+        'X-Refresh-Token',
+        'X-Id-Token',
+        'X-CSRF-Token',
+        'X-XSRF-TOKEN',
+        'X-Amz-Security-Token',
+        'X-Goog-Api-Key',
+        'X-Session-Token',
+      ];
+      final out = _engine().maskHeaders({
+        for (final n in names) n: 'secret-value',
+        'Accept': 'application/json',
+      });
+      for (final n in names) {
+        expect(out[n], '***', reason: n);
+      }
+      expect(out['Accept'], 'application/json');
+    });
+
+    test('a header named like a sensitive key is masked', () {
+      final out = _engine().maskHeaders({
+        'X-Custom-Token': 'abc',
+        'X-Client-Secret': 'def',
+        'Content-Type': 'application/json',
+      });
+      expect(out, {
+        'X-Custom-Token': '***',
+        'X-Client-Secret': '***',
+        'Content-Type': 'application/json',
+      });
+    });
+
+    test('the default denylist stays on with useDefaultKeys: false', () {
+      final out = _engine(
+        const MaskConfig(useDefaultKeys: false),
+      ).maskHeaders({'X-Auth-Token': 'a', 'X-Custom-Token': 'b'});
+      expect(out, {'X-Auth-Token': '***', 'X-Custom-Token': 'b'});
+    });
+
+    test('URL query keys use the same matching', () {
+      expect(
+        _engine().maskUrl('https://a.com/cb?accessToken=abc&idToken=d&x=1'),
+        'https://a.com/cb?accessToken=***&idToken=***&x=1',
+      );
+    });
+  });
 }

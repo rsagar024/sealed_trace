@@ -25,11 +25,14 @@ First release.
   With `enabled: false`, or below `minLevel`, a call returns before anything
   is allocated.
 - **On-device masking.**
-  - Sensitive keys are replaced: an exact, case-insensitive default list plus
-    your own keys.
-  - Patterns are replaced: email, card numbers (Luhn or card grouping),
-    coordinates, Indian and US phone numbers, plus your own patterns.
-  - Header denylist, URL query and userinfo redaction.
+  - Sensitive keys are replaced: a default list plus your own keys, matched
+    ignoring case and `_`, `-`, `.`, plus any key containing a credential
+    fragment such as `token`, `secret` or `password`, or ending with `auth`.
+  - Patterns are replaced: JWTs, `Bearer` tokens, email, card numbers (Luhn
+    or card grouping), coordinates, Indian and US phone numbers, plus your own
+    patterns.
+  - Header denylist (14 credential headers, plus any header named like a
+    sensitive key), URL query and userinfo redaction.
   - String length cap; idempotent; fails closed.
 - **Hybrid encryption per batch.**
   - AES-256-GCM with a fresh key, wrapped with the project's RSA-2048 public
@@ -68,3 +71,11 @@ First release.
   `local` or `SealedTraceConfig(allowInsecureHttp: true)` is set. This keeps
   the `X-Api-Key` header off the wire in cleartext and stops a network
   attacker from forging `202` acknowledgements that would delete pending logs.
+- **Credential masking covers real-world names.** Key matching ignores
+  separators and case and also catches credential fragments, so
+  `accessToken`, `id_token`, `client_secret`, `x-auth-token` and `sessionId`
+  are masked. JWTs and `Bearer` tokens are masked in every string, including
+  JSON values and log messages. The header denylist now covers
+  `Proxy-Authorization`, `X-Auth-Token`, `X-CSRF-Token`,
+  `X-Amz-Security-Token`, `X-Goog-Api-Key` and similar. Text bodies use the
+  same key rules as JSON.

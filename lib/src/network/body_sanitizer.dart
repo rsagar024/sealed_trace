@@ -158,16 +158,6 @@ class BodySanitizer {
 
   // ---- credentials in free text ----
 
-  /// Header names that can show up as `name: value` inside text bodies, in
-  /// addition to the engine's sensitive keys.
-  static const List<String> _extraTextKeys = <String>[
-    'authorization',
-    'proxy-authorization',
-    'cookie',
-    'set-cookie',
-    'x-api-key',
-  ];
-
   static const Set<String> _schemeWords = <String>{
     'bearer',
     'basic',
@@ -187,55 +177,53 @@ class BodySanitizer {
     caseSensitive: false,
   );
 
-  static String _keysCache = '';
-  static RegExp? _jsonPair;
-  static RegExp? _xmlPair;
-  static RegExp? _plainPair;
+  // The key-value forms capture the key name; the engine decides whether it
+  // is sensitive, so text bodies follow exactly the same rules as JSON.
+
+  // "key": value
+  static final RegExp _jsonPair = RegExp(
+    r'("([^"\\\r\n]{1,64})"\s*:\s*)("(?:[^"\\]|\\.){0,2000}"|[^\s,}\]]{1,500})',
+  );
+
+  // <key attr>value</key>
+  static final RegExp _xmlPair = RegExp(
+    r'(<([A-Za-z_][A-Za-z0-9_.:\-]{0,63})(?:\s[^>]{0,200})?>)([^<]{0,2000})'
+    r'(</\2>)',
+    caseSensitive: false,
+  );
+
+  // key=value, key: value, key = "value"
+  static final RegExp _plainPair = RegExp(
+    r'''(\b([A-Za-z_][A-Za-z0-9_.\-]{0,63})["']?\s{0,5}[=:]\s{0,5}["']?)'''
+    r'''([^\s&,;"'<>{}\[\]]{1,500})''',
+  );
+
+  bool _sensitive(String key) => engine.isSensitiveHeader(key);
 
   /// Masks credentials that the pattern pass cannot see: scheme tokens such as
-  /// `Bearer abc`, and `key=value`, `key: value`, `"key": "value"` and
-  /// `<key>value</key>` forms for every sensitive key.
+  /// `Basic abc`, and `key=value`, `key: value`, `"key": "value"` and
+  /// `<key>value</key>` forms for every sensitive key or header name.
   String _credentialPass(String text) {
     var out = text.replaceAllMapped(_scheme, (m) => '${m[1]}${m[2]}***');
     out = out.replaceAllMapped(_cookieLine, (m) => '${m[1]}***');
-
-    final keys = <String>{...engine.sensitiveKeys, ..._extraTextKeys}.toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
-    if (keys.isEmpty) return out;
-    final signature = keys.join('|');
-    if (signature != _keysCache) {
-      final alternation = keys.map(RegExp.escape).join('|');
-      _jsonPair = RegExp(
-        '("(?:$alternation)"\\s*:\\s*)'
-        r'("(?:[^"\\]|\\.){0,2000}"|[^\s,}\]]{1,500})',
-        caseSensitive: false,
-      );
-      _xmlPair = RegExp(
-        '(<(?:$alternation)(?:\\s[^>]{0,200})?>)([^<]{0,2000})'
-        '(</(?:$alternation)>)',
-        caseSensitive: false,
-      );
-      _plainPair = RegExp(
-        '(\\b(?:$alternation)["\']?\\s{0,5}[=:]\\s{0,5}["\']?)'
-        '([^\\s&,;"\'<>{}\\[\\]]{1,500})',
-        caseSensitive: false,
-      );
-      _keysCache = signature;
-    }
-    out = out.replaceAllMapped(
-      _jsonPair!,
-      (m) => '${m[1]}"${engine.replacement}"',
-    );
-    out = out.replaceAllMapped(
-      _xmlPair!,
-      (m) => '${m[1]}${engine.replacement}${m[3]}',
-    );
-    out = out.replaceAllMapped(_plainPair!, (m) {
-      // "Authorization: Bearer ***": keep the scheme word, the scheme pass
-      // already masked the token after it.
-      if (_schemeWords.contains(m[2]!.toLowerCase())) return m[0]!;
-      return '${m[1]}${engine.replacement}';
+    out = out.replaceAllMapped(_jsonPair, (m) {
+      if (!_sensitive(m[2]!)) return m[0]!;
+      return '${m[1]}"${engine.replacement}"';
     });
-    return out;
+    out = out.replaceAllMapped(_xmlPair, (m) {
+      if (!_sensitive(m[2]!)) return m[0]!;
+      return '${m[1]}${engine.replacement}${m[4]}';
+    });
+    return _plainPass(out);
   }
+
+  String _plainPass(String text) => text.replaceAllMapped(_plainPair, (m) {
+    final value = m[3]!;
+    // A harmless key must not hide a pair in its value: `note:password=x`.
+    if (!_sensitive(m[2]!)) return '${m[1]}${_plainPass(value)}';
+    // "Authorization: Bearer ***": keep the scheme word, the scheme pass
+    // already masked the token after it.
+    if (_schemeWords.contains(value.toLowerCase())) return m[0]!;
+    return '${m[1]}${engine.replacement}';
+  });
 }

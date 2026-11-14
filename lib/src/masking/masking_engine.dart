@@ -23,14 +23,16 @@ class MaskingEngine {
     void Function(Object error, StackTrace stack)? onError,
   }) : replacement = config.replacement,
        _maskUserName = config.maskUserName,
+       _useDefaultKeys = config.useDefaultKeys,
        _onError = onError {
     if (config.useDefaultKeys) {
       _keys.addAll(defaultSensitiveKeys.map(_normalize));
+      _fragments.addAll(defaultSensitiveKeyFragments.map(_normalize));
     }
     _keys.addAll(config.extraKeys.map(_normalize));
     _headerDenylist
       ..addAll(defaultHeaderDenylist)
-      ..addAll(config.extraHeaderDenylist.map(_normalize));
+      ..addAll(config.extraHeaderDenylist.map(_headerName));
     if (config.useDefaultPatterns) _rules.addAll(buildDefaultRules());
     for (final pattern in config.extraPatterns) {
       if (!addPattern(pattern)) {
@@ -44,7 +46,9 @@ class MaskingEngine {
 
   final bool _maskUserName;
   final void Function(Object error, StackTrace stack)? _onError;
+  final bool _useDefaultKeys;
   final Set<String> _keys = <String>{};
+  final List<String> _fragments = <String>[];
   final Set<String> _headerDenylist = <String>{};
   final List<MaskRule> _rules = <MaskRule>[];
 
@@ -56,9 +60,17 @@ class MaskingEngine {
 
   static const int _maxDepth = 12;
 
-  static String _normalize(String key) => key.trim().toLowerCase();
+  static final RegExp _keySeparators = RegExp(r'[\s_.\-]');
 
-  /// Adds sensitive keys, matched exactly and case-insensitively.
+  /// Lower-cases [key] and drops `_`, `-`, `.` and whitespace, so
+  /// `access_token`, `accessToken` and `Access-Token` compare equal.
+  static String _normalize(String key) =>
+      key.toLowerCase().replaceAll(_keySeparators, '');
+
+  static String _headerName(String name) => name.trim().toLowerCase();
+
+  /// Adds sensitive keys, matched case-insensitively and ignoring `_`, `-`,
+  /// `.` and whitespace.
   void addKeys(Iterable<String> keys) => _keys.addAll(keys.map(_normalize));
 
   /// Adds a pattern whose matches are replaced in every string.
@@ -75,12 +87,31 @@ class MaskingEngine {
     return true;
   }
 
-  /// The sensitive keys currently in force, lower-cased: the defaults, the
-  /// configured extras, and any added at runtime.
+  /// The exact sensitive keys currently in force, normalized: the defaults,
+  /// the configured extras, and any added at runtime.
   Iterable<String> get sensitiveKeys => _keys;
 
   /// Whether the value stored under [key] must be masked.
-  bool isSensitiveKey(String key) => _keys.contains(_normalize(key));
+  ///
+  /// True when the normalized key is one of [sensitiveKeys] or, with the
+  /// default keys on, contains a default fragment such as `token` or
+  /// `secret`, or ends with `auth`.
+  bool isSensitiveKey(String key) {
+    final normalized = _normalize(key);
+    if (normalized.isEmpty) return false;
+    if (_keys.contains(normalized)) return true;
+    if (!_useDefaultKeys) return false;
+    if (normalized.endsWith('auth')) return true;
+    for (final fragment in _fragments) {
+      if (normalized.contains(fragment)) return true;
+    }
+    return false;
+  }
+
+  /// Whether a header, or a `name: value` line in a text body, called [name]
+  /// must be masked: it is denylisted or a sensitive key.
+  bool isSensitiveHeader(String name) =>
+      _headerDenylist.contains(_headerName(name)) || isSensitiveKey(name);
 
   /// Masks PII patterns in [input].
   String maskString(String input) {
@@ -131,13 +162,15 @@ class MaskingEngine {
     return _map(map, 0, HashSet.identity());
   }
 
-  /// Redacts headers: denylisted names have their values replaced.
+  /// Redacts headers: denylisted names, and names that are sensitive keys
+  /// (such as `X-Custom-Token`), have their values replaced.
   Map<String, dynamic> maskHeaders(Map<dynamic, dynamic>? headers) =>
       redactHeaders(
         headers,
         denylist: _headerDenylist,
         replacement: replacement,
         maskString: maskString,
+        isSensitiveName: isSensitiveKey,
       );
 
   /// Redacts a query string or a form-encoded body such as `a=1&token=x`.

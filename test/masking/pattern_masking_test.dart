@@ -185,6 +185,44 @@ void main() {
       expect(errors, hasLength(1));
     });
   });
+  group('H2: JWT and Bearer patterns apply to every string', () {
+    const jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJlLXZhbHVl';
+
+    test('a JWT in a log message is masked', () {
+      expect(
+        _engine.maskString('login ok, token was $jwt for user'),
+        'login ok, token was *** for user',
+      );
+    });
+
+    test('a JWT in a URL path is masked', () {
+      expect(_engine.maskString('/reset/$jwt/confirm'), '/reset/***/confirm');
+    });
+
+    test('an unsigned JWT is masked', () {
+      expect(
+        _engine.maskString('t=eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.'),
+        't=***',
+      );
+    });
+
+    test('a Bearer token in free text keeps the scheme word', () {
+      expect(
+        _engine.maskString('sent Authorization Bearer abc.def-ghi_123 ok'),
+        'sent Authorization Bearer *** ok',
+      );
+    });
+
+    test('masking stays idempotent', () {
+      final once = _engine.maskString('Bearer abcdef123 and $jwt');
+      expect(_engine.maskString(once), once);
+    });
+
+    test('ordinary words are left alone', () {
+      _untouched('Bearer of bad news');
+      _untouched('eyJ alone is not a token');
+    });
+  });
 }
 
 // A user may pass any RegExp; this double lets us exercise a failing one.
