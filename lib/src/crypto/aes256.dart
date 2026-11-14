@@ -19,6 +19,13 @@ class Aes256 {
 
   final Uint32List _roundKeys;
 
+  /// Overwrites the expanded key with zeros (its first 8 words are the key
+  /// itself). The instance must not be used afterwards.
+  void destroy() => _roundKeys.fillRange(0, _roundKeys.length, 0);
+
+  /// The expanded key, so callers and tests can check [destroy] wiped it.
+  Uint32List get debugRoundKeys => _roundKeys;
+
   /// Encrypts the 16 bytes at [inOffset] of [input] into [output] at
   /// [outOffset]. Input and output may be the same buffer.
   void encryptBlock(

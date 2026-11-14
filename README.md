@@ -568,6 +568,10 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   opt in with `sendUserDisplayName: true` or `maskUserName: false`, the server can read it.
 - **Logs are not proof of origin.** The API key can be extracted from the app, so without attestation anyone can
   submit envelopes. See [Sender authenticity](#sender-authenticity).
+- **Key material is wiped on a best-effort basis.** After each seal the AES key, its expanded round keys, the
+  GHASH key, the tag mask, the OAEP buffers and seed, and the plaintext buffer are overwritten with zeros, also in
+  the background isolate. Dart cannot wipe immutable copies (the JSON string, `BigInt` values, WebCrypto's key),
+  and the garbage collector may have moved buffers, so a memory dump of a compromised device can still find them.
 - **The crypto has not been audited and is not constant-time.** Every envelope uses a fresh key once, and only the
   public-key operation runs on the device, which limits the exposure but does not remove it.
 

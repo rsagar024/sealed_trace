@@ -67,8 +67,9 @@ class EnvelopeSealer {
       );
       return _assemble(records, header, plaintext, key, iv, encrypted);
     } finally {
-      // Best effort: the key must not outlive the call.
+      // Best effort: neither the key nor the plaintext may outlive the call.
       key.fillRange(0, key.length, 0);
+      plaintext.fillRange(0, plaintext.length, 0);
     }
   }
 
@@ -89,6 +90,7 @@ class EnvelopeSealer {
       return _assemble(records, header, plaintext, key, iv, encrypted);
     } finally {
       key.fillRange(0, key.length, 0);
+      plaintext.fillRange(0, plaintext.length, 0);
     }
   }
 

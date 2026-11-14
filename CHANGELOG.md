@@ -144,3 +144,8 @@ First release.
   entries are counted in `diagnostics.spillEntriesRejected`. The README
   now states that the spill is not tamper-proof against same-origin
   scripts.
+- **Key material is wiped after use (best effort).** The expanded AES round
+  keys, the GHASH key H and its state, the tag mask and keystream, the
+  RSA-OAEP DB, masks and EM, the OAEP seed, the background isolate's copy
+  of the key and plaintext, and the plaintext buffer are overwritten with
+  zeros once sealing is done.

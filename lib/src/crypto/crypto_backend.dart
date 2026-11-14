@@ -48,6 +48,19 @@ Future<AesGcmResult> runAesGcm(AesGcmJob job) async {
   return AesGcmResult(ciphertext, tag);
 }
 
+/// Like [runAesGcm], for a job that is a private copy, such as the one a
+/// background isolate receives: encrypts, then overwrites the job's key and
+/// plaintext with zeros. Never use it on a caller's own buffers, because the
+/// sealer still needs its key to wrap it.
+Future<AesGcmResult> runAesGcmAndWipe(AesGcmJob job) async {
+  try {
+    return await runAesGcm(job);
+  } finally {
+    job.key.fillRange(0, job.key.length, 0);
+    job.plaintext.fillRange(0, job.plaintext.length, 0);
+  }
+}
+
 /// The primitives the envelope sealer needs. Replaceable in tests.
 abstract interface class CryptoBackend {
   /// [length] cryptographically secure random bytes.
@@ -139,6 +152,12 @@ class DefaultCryptoBackend implements CryptoBackend {
   }
 
   @override
-  Uint8List rsaOaepWrap(RsaPublicKeyData key, Uint8List data) =>
-      RsaOaep.encrypt(key, data, randomBytes(RsaOaep.seedLength));
+  Uint8List rsaOaepWrap(RsaPublicKeyData key, Uint8List data) {
+    final seed = randomBytes(RsaOaep.seedLength);
+    try {
+      return RsaOaep.encrypt(key, data, seed);
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
+  }
 }
