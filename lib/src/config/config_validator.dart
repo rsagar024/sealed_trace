@@ -16,6 +16,13 @@ abstract final class ConfigValidator {
     }
     if (!_isValidBaseUrl(config.baseUrl)) {
       problems.add('baseUrl must be an absolute http(s) URL');
+    } else if (_isCleartext(config.baseUrl) &&
+        !config.allowInsecureHttp &&
+        !_cleartextEnvs.contains(config.env.name)) {
+      problems.add(
+        'baseUrl must use https outside dev/local envs (got http with env '
+        '"${config.env.name}"); set allowInsecureHttp: true to override',
+      );
     }
     if (!_looksLikePem(config.publicKeyPem)) {
       problems.add('publicKeyPem must be a PEM-encoded public key');
@@ -52,6 +59,12 @@ abstract final class ConfigValidator {
         uri.host.isNotEmpty &&
         (uri.scheme == 'http' || uri.scheme == 'https');
   }
+
+  /// Envs where a cleartext `http://` baseUrl is accepted without opting in.
+  static const Set<String> _cleartextEnvs = <String>{'dev', 'local'};
+
+  static bool _isCleartext(String value) =>
+      Uri.tryParse(value.trim())?.scheme.toLowerCase() == 'http';
 
   static bool _looksLikePem(String value) {
     final text = value.trim();

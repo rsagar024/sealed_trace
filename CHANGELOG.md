@@ -60,3 +60,11 @@ First release.
 - **Web page exit.** When the page is hidden or closed, queued events are
   sealed synchronously into a `localStorage` spill (ciphertext only) and moved
   to IndexedDB at the next start.
+
+### Security
+
+- **HTTPS required outside dev/local.** An `http://` `baseUrl` is rejected,
+  leaving the SDK disabled and reporting the problem, unless `env` is `dev` or
+  `local` or `SealedTraceConfig(allowInsecureHttp: true)` is set. This keeps
+  the `X-Api-Key` header off the wire in cleartext and stops a network
+  attacker from forging `202` acknowledgements that would delete pending logs.

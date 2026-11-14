@@ -60,6 +60,78 @@ void main() {
     }
   });
 
+  group('cleartext http baseUrl (H1)', () {
+    String problemFor(String env) =>
+        'baseUrl must use https outside dev/local envs (got http with env '
+        '"$env"); set allowInsecureHttp: true to override';
+
+    test('rejected in prod (default), staging and custom envs', () {
+      final http = _valid.copyWith(baseUrl: 'http://logs.example.com');
+      expect(ConfigValidator.validate(http), [problemFor('prod')]);
+      for (final name in ['staging', 'qa']) {
+        expect(
+          ConfigValidator.validate(http.copyWith(env: SealedTraceEnv(name))),
+          [problemFor(name)],
+          reason: name,
+        );
+      }
+    });
+
+    test('rejected regardless of scheme case', () {
+      expect(
+        ConfigValidator.validate(
+          _valid.copyWith(baseUrl: 'HTTP://LOGS.example.com'),
+        ),
+        [problemFor('prod')],
+      );
+    });
+
+    test('accepted in dev and local envs', () {
+      for (final name in ['dev', 'local']) {
+        expect(
+          ConfigValidator.validate(
+            _valid.copyWith(
+              baseUrl: 'http://10.0.2.2:8080',
+              env: SealedTraceEnv(name),
+            ),
+          ),
+          isEmpty,
+          reason: name,
+        );
+      }
+    });
+
+    test('accepted anywhere with allowInsecureHttp: true', () {
+      expect(
+        ConfigValidator.validate(
+          _valid.copyWith(
+            baseUrl: 'http://logs.example.com',
+            allowInsecureHttp: true,
+          ),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('https is accepted in every env', () {
+      for (final name in ['dev', 'local', 'staging', 'prod', 'qa']) {
+        expect(
+          ConfigValidator.validate(_valid.copyWith(env: SealedTraceEnv(name))),
+          isEmpty,
+          reason: name,
+        );
+      }
+    });
+
+    test('allowInsecureHttp defaults to false and survives copyWith', () {
+      expect(_valid.allowInsecureHttp, isFalse);
+      final c = _valid.copyWith(allowInsecureHttp: true);
+      expect(c.allowInsecureHttp, isTrue);
+      expect(c, isNot(_valid));
+      expect(c.copyWith(appName: 'x').allowInsecureHttp, isTrue);
+    });
+  });
+
   test('rejects non-PEM keys', () {
     for (final pem in ['', 'not a key', '-----BEGIN PRIVATE KEY-----']) {
       expect(

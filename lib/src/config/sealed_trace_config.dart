@@ -24,6 +24,7 @@ class SealedTraceConfig {
     this.verboseInternalLogs = false,
     this.databaseDirectory,
     this.sendUserDisplayName = true,
+    this.allowInsecureHttp = false,
   });
 
   /// Server base URL. Uploads go to `{baseUrl}/api/v1/ingest/logs`.
@@ -78,6 +79,14 @@ class SealedTraceConfig {
   /// keep the readable name on the device.
   final bool sendUserDisplayName;
 
+  /// Allows a cleartext `http://` [baseUrl] when [env] is not `dev` or
+  /// `local`. Defaults to false, so such a config leaves the SDK disabled.
+  ///
+  /// Over plain HTTP anyone on the network path can read the `X-Api-Key`
+  /// header, and an active attacker can forge the server's acknowledgement
+  /// so the device deletes every pending log. Never enable it in production.
+  final bool allowInsecureHttp;
+
   /// Returns a copy with the given fields replaced.
   SealedTraceConfig copyWith({
     String? baseUrl,
@@ -95,6 +104,7 @@ class SealedTraceConfig {
     bool? verboseInternalLogs,
     String? databaseDirectory,
     bool? sendUserDisplayName,
+    bool? allowInsecureHttp,
   }) {
     return SealedTraceConfig(
       baseUrl: baseUrl ?? this.baseUrl,
@@ -112,6 +122,7 @@ class SealedTraceConfig {
       verboseInternalLogs: verboseInternalLogs ?? this.verboseInternalLogs,
       databaseDirectory: databaseDirectory ?? this.databaseDirectory,
       sendUserDisplayName: sendUserDisplayName ?? this.sendUserDisplayName,
+      allowInsecureHttp: allowInsecureHttp ?? this.allowInsecureHttp,
     );
   }
 
@@ -132,7 +143,8 @@ class SealedTraceConfig {
       networkLogConfig == other.networkLogConfig &&
       verboseInternalLogs == other.verboseInternalLogs &&
       databaseDirectory == other.databaseDirectory &&
-      sendUserDisplayName == other.sendUserDisplayName;
+      sendUserDisplayName == other.sendUserDisplayName &&
+      allowInsecureHttp == other.allowInsecureHttp;
 
   @override
   int get hashCode => Object.hash(
@@ -151,6 +163,7 @@ class SealedTraceConfig {
     verboseInternalLogs,
     databaseDirectory,
     sendUserDisplayName,
+    allowInsecureHttp,
   );
 
   // Deliberately omits apiKey so a config never leaks the key into logs.

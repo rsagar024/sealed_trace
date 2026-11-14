@@ -222,7 +222,7 @@ Two rules to know up front:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `baseUrl` | required | Absolute `http(s)` URL of the SealedTrace server. Trailing slashes are ignored. |
+| `baseUrl` | required | Absolute URL of the SealedTrace server. Trailing slashes are ignored. Must be `https` unless `env` is `dev` or `local` or `allowInsecureHttp` is `true`; otherwise the SDK stays disabled and reports the problem. |
 | `projectId` | required | Project the envelopes belong to. |
 | `apiKey` | required | Sent only as the `X-Api-Key` header. |
 | `publicKeyPem` | required | The project's RSA-2048 public key, SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
@@ -236,6 +236,7 @@ Two rules to know up front:
 | `networkLogConfig` | `NetworkLogConfig()` | [Dio interceptor](#networklogconfig). |
 | `verboseInternalLogs` | `false` | Prints the SDK's own diagnostics with `debugPrint`. These never contain log content. |
 | `sendUserDisplayName` | `true` | Also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. `false` never sends it. |
+| `allowInsecureHttp` | `false` | Accepts an `http://` `baseUrl` in any `env`. Over plain HTTP the API key can be read and a network attacker can forge acknowledgements that delete pending logs. Never enable it in production. |
 | `databaseDirectory` | `null` | Where the SQLite file lives. Defaults to the application support directory. Pure-Dart apps must set it, or the SDK uses memory storage. |
 
 <a id="maskconfig"></a>
@@ -395,7 +396,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 
 | Config field | Where it comes from | Notes |
 |---|---|---|
-| `baseUrl` | your SealedTrace server | `https` in production (Android blocks cleartext by default). |
+| `baseUrl` | your SealedTrace server | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
 | `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
 | `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. |
 | `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. |
@@ -453,7 +454,7 @@ and add the flavor. Flavor names must follow the `env` rules (lowercase, 1–32 
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-- Use an `https` `baseUrl`. Android blocks plain HTTP unless you add a network security config.
+- Use an `https` `baseUrl`. The SDK rejects `http` outside `dev`/`local` envs, and Android blocks plain HTTP unless you add a network security config.
 - Release builds with R8 need no keep rules for this package.
 
 ### iOS and macOS
