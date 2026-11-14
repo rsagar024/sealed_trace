@@ -144,12 +144,12 @@ abstract final class SealedTrace {
 
   /// Sets the current user. Pass a null [id] on logout.
   ///
-  /// [name] is trimmed and cut to 256 characters, then sent as given in
-  /// `ctx.userName`, so the console shows it in the Users tab, the log list
-  /// and log detail. Set `MaskConfig.maskUserName` to send `***` instead.
-  /// Unless `SealedTraceConfig.sendUserDisplayName` is false it is also sent,
-  /// never masked, as `ctx.userDisplayName` for the Users tab. Both travel
-  /// only inside the sealed envelope. `setUser(null)`, or a call without
+  /// [name] is trimmed and cut to 256 characters. By default it never leaves
+  /// the device readable: `ctx.userName` is sent as `***`
+  /// (`MaskConfig.maskUserName`, default true) and `ctx.userDisplayName` is
+  /// not sent (`SealedTraceConfig.sendUserDisplayName`, default false). Opt in
+  /// to either so the console can show who each user is. Both travel only
+  /// inside the sealed envelope. `setUser(null)`, or a call without
   /// [name], clears both. No-op before [init].
   static void setUser(String? id, {String? name}) {
     final runtime = _runtime;

@@ -10,7 +10,7 @@ class MaskConfig {
     this.useDefaultKeys = true,
     this.useDefaultPatterns = true,
     this.replacement = '***',
-    this.maskUserName = false,
+    this.maskUserName = true,
   });
 
   /// Extra sensitive keys, matched on the whole key, ignoring case and the
@@ -32,10 +32,11 @@ class MaskConfig {
   /// Text that replaces masked values.
   final String replacement;
 
-  /// When true, the name passed to `SealedTrace.setUser(name:)` is sent as
-  /// [replacement] in `ctx.userName`. When false (the default) it is sent as
-  /// given, so the console can show who each user is. Either way it travels
-  /// only inside the sealed envelope.
+  /// When true (the default), the name passed to `SealedTrace.setUser(name:)`
+  /// is sent as [replacement] in `ctx.userName`. When false it is sent as
+  /// given, so the console's log list and log detail can show it. Either way
+  /// it travels only inside the sealed envelope. `ctx.userDisplayName` is
+  /// controlled separately by `SealedTraceConfig.sendUserDisplayName`.
   final bool maskUserName;
 
   /// Returns a copy with the given fields replaced.

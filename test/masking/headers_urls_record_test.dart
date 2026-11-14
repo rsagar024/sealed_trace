@@ -178,13 +178,13 @@ void main() {
       expect(out.ctx['feature'], 'beta');
     });
 
-    test('userName is sent as given by default', () {
-      expect(_engine().maskRecord(record()).ctx['userName'], 'Asha Rao');
+    test('userName is masked by default (M3)', () {
+      expect(_engine().maskRecord(record()).ctx['userName'], '***');
     });
 
-    test('maskUserName replaces userName', () {
-      final engine = _engine(const MaskConfig(maskUserName: true));
-      expect(engine.maskRecord(record()).ctx['userName'], '***');
+    test('maskUserName: false sends userName as given', () {
+      final engine = _engine(const MaskConfig(maskUserName: false));
+      expect(engine.maskRecord(record()).ctx['userName'], 'Asha Rao');
     });
 
     test('ids, tag, level, user id and core context are untouched', () {

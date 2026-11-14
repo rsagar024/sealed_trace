@@ -178,10 +178,12 @@ Two rules to know up front:
      'deviceModel': '<device model>', // Android: androidInfo.model · iOS: iosInfo.modelName
    });
    ```
-   The `name` is trimmed, cut to 256 characters and sent as given in `ctx.userName` (plus `ctx.userDisplayName`
-   for the console's Users tab), so the console shows who each user is in the Users tab, the log list and log
-   detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
-   `MaskConfig(maskUserName: true)` to send `***` in `ctx.userName` instead. `setUser(null)` clears both.
+   The `name` is trimmed and cut to 256 characters. **By default it never leaves the device readable:**
+   `ctx.userName` is sent as `***` and `ctx.userDisplayName` is not sent. To let the console show who each user
+   is, opt in: `sendUserDisplayName: true` sends the name as `ctx.userDisplayName` (Users tab), and
+   `MaskConfig(maskUserName: false)` sends it in `ctx.userName` (log list and detail). It travels only inside the
+   sealed envelope, but the server can read it, so opt in only if that is allowed for your users.
+   `setUser(null)` clears both.
 
    The console's device card reads these keys, read with
    [`device_info_plus`](https://pub.dev/packages/device_info_plus):
@@ -235,7 +237,7 @@ Two rules to know up front:
 | `retentionConfig` | `RetentionConfig()` | [Retention](#retentionconfig). |
 | `networkLogConfig` | `NetworkLogConfig()` | [Dio interceptor](#networklogconfig). |
 | `verboseInternalLogs` | `false` | Prints the SDK's own diagnostics with `debugPrint`. These never contain log content. |
-| `sendUserDisplayName` | `true` | Also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. `false` never sends it. |
+| `sendUserDisplayName` | `false` | `true` also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. Off by default, so no readable name leaves the device. `maskUserName` does not affect it. |
 | `allowInsecureHttp` | `false` | Accepts an `http://` `baseUrl` in any `env`. Over plain HTTP the API key can be read and a network attacker can forge acknowledgements that delete pending logs. Never enable it in production. |
 | `databaseDirectory` | `null` | Where the SQLite file lives. Defaults to the application support directory. Pure-Dart apps must set it, or the SDK uses memory storage. |
 
@@ -251,7 +253,7 @@ Two rules to know up front:
 | `useDefaultKeys` | `true` | Exact keys (separators and case ignored): `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv`, `username`, `otp`, `pin`, `mpin`, `cvc`, `session`, `sessionId`, `sid`, `cardNumber`, `ccNumber`, `client_secret`, `authCode`. Plus any key that **contains** `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `apikey`, `privatekey`, `authorization`, `cookie` or `jwt` (`idToken`, `x-csrf-token`, `oldPassword`), or **ends with** `auth` (`oauth`, `basicAuth`; not `author`). |
 | `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens anywhere in a string (messages, JSON values, URLs); email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. |
 | `replacement` | `'***'` | Replacement text. |
-| `maskUserName` | `false` | `true` sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. By default the name is sent as given so the console can show it. |
+| `maskUserName` | `true` | Sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. `false` sends the name as given so the console's log list and detail can show it. |
 
 The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
 `X-Access-Token`, `X-Refresh-Token`, `X-Id-Token`, `X-CSRF-Token`, `X-XSRF-Token`, `X-Amz-Security-Token`,
@@ -323,7 +325,7 @@ SealedTrace.e('tag', 'message', error: error, stack: stack);
 SealedTrace.log(LogEvent(level: LogLevel.warning, tag: 'tag', message: 'message'));
 
 // Context: these do nothing before init has completed.
-SealedTrace.setUser('user-42', name: 'Asha');   // shown as "Asha" in the console; MaskConfig.maskUserName hides it
+SealedTrace.setUser('user-42', name: 'Asha');   // sent as *** unless you opt in (sendUserDisplayName, maskUserName)
 SealedTrace.setContext({'deviceId': id, 'deviceModel': model});   // required keys; extra keys are allowed
 SealedTrace.addMaskKeys(['iban']);
 SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));
@@ -548,9 +550,8 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   string whatever the key.
 - **Fragment matching can over-mask**: `passwordHint` or `tokenCount` are masked too.
 - **`userId`, `tag` and the device context are never masked.** Don't put personal data in them. A name passed to
-  `setUser(name:)` is sent as given in `ctx.userName` and `ctx.userDisplayName`, inside the sealed envelope, so
-  the server can show it. Set `MaskConfig(maskUserName: true)` and `sendUserDisplayName: false` to keep it on the
-  device.
+  `setUser(name:)` stays on the device by default (`***` in `ctx.userName`, no `ctx.userDisplayName`). If you
+  opt in with `sendUserDisplayName: true` or `maskUserName: false`, the server can read it.
 - **Logs are not proof of origin.** The API key can be extracted from the app, so without attestation anyone can
   submit envelopes. See [Sender authenticity](#sender-authenticity).
 - **The crypto has not been audited and is not constant-time.** Every envelope uses a fresh key once, and only the

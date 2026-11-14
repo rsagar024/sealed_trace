@@ -23,7 +23,7 @@ class SealedTraceConfig {
     this.networkLogConfig = const NetworkLogConfig(),
     this.verboseInternalLogs = false,
     this.databaseDirectory,
-    this.sendUserDisplayName = true,
+    this.sendUserDisplayName = false,
     this.allowInsecureHttp = false,
   });
 
@@ -75,12 +75,14 @@ class SealedTraceConfig {
   /// `path_provider` application support directory is used.
   final String? databaseDirectory;
 
-  /// Sends the name passed to `SealedTrace.setUser(name:)` unmasked as
-  /// `ctx.userDisplayName`, so the console's Users tab can show it.
+  /// When true, also sends the name passed to `SealedTrace.setUser(name:)`,
+  /// never masked, as `ctx.userDisplayName`, so the console's Users tab can
+  /// show it. Defaults to false: no readable name leaves the device unless
+  /// you opt in.
   ///
-  /// The name travels only inside the sealed envelope, and the server never
-  /// shows it in log views, where `ctx.userName` stays masked. Set to false to
-  /// keep the readable name on the device.
+  /// It travels only inside the sealed envelope, but the server can read it.
+  /// `MaskConfig.maskUserName` does not affect it: it only controls
+  /// `ctx.userName`, which is `***` by default.
   final bool sendUserDisplayName;
 
   /// Allows a cleartext `http://` [baseUrl] when [env] is not `dev` or

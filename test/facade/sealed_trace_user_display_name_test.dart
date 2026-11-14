@@ -7,12 +7,24 @@ import 'package:sealed_trace/src/storage/memory_storage_adapter.dart';
 import '../helpers/fakes.dart';
 import '../helpers/test_keys.dart';
 
+/// The defaults: no readable name leaves the device (M3).
+const _defaults = SealedTraceConfig(
+  baseUrl: 'https://logs.example.com',
+  projectId: 'proj',
+  apiKey: 'key',
+  publicKeyPem: testPublicKeySpki,
+  appName: 'app',
+);
+
+/// Fully opted in to readable names, as an app showing them would be.
 const _config = SealedTraceConfig(
   baseUrl: 'https://logs.example.com',
   projectId: 'proj',
   apiKey: 'key',
   publicKeyPem: testPublicKeySpki,
   appName: 'app',
+  sendUserDisplayName: true,
+  maskConfig: MaskConfig(maskUserName: false),
 );
 
 late RecordingSink sink;
@@ -50,7 +62,42 @@ void main() {
     SealedTrace.onException = null;
   });
 
-  test('setUser sends the name readably in both keys', () async {
+  group('M3: privacy by default', () {
+    test('by default no readable name leaves the device', () async {
+      await _init(_defaults);
+      SealedTrace.setUser('u1', name: 'Demo User');
+      final record = await _logOne();
+      expect(record.userId, 'u1');
+      expect(record.ctx['userName'], '***');
+      expect(record.ctx.containsKey('userDisplayName'), isFalse);
+      expect('${record.toJson()}', isNot(contains('Demo User')));
+    });
+
+    test('the defaults are maskUserName: true, sendUserDisplayName: false', () {
+      expect(const MaskConfig().maskUserName, isTrue);
+      expect(_defaults.sendUserDisplayName, isFalse);
+    });
+
+    test('sendUserDisplayName alone sends only userDisplayName', () async {
+      await _init(_defaults.copyWith(sendUserDisplayName: true));
+      SealedTrace.setUser('u1', name: 'Demo User');
+      final record = await _logOne();
+      expect(record.ctx['userName'], '***');
+      expect(record.ctx['userDisplayName'], 'Demo User');
+    });
+
+    test('maskUserName: false alone sends only userName', () async {
+      await _init(
+        _defaults.copyWith(maskConfig: const MaskConfig(maskUserName: false)),
+      );
+      SealedTrace.setUser('u1', name: 'Demo User');
+      final record = await _logOne();
+      expect(record.ctx['userName'], 'Demo User');
+      expect(record.ctx.containsKey('userDisplayName'), isFalse);
+    });
+  });
+
+  test('opted in, setUser sends the name readably in both keys', () async {
     await _init();
     SealedTrace.setUser('u1', name: 'Demo User');
     final record = await _logOne();

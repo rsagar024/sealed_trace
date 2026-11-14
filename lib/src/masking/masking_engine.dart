@@ -192,9 +192,11 @@ class MaskingEngine {
   /// Masks every free-text part of [record].
   ///
   /// `id`, `seq`, `ts`, `level`, `tag`, `sessionId`, `userId` and the SDK's own
-  /// context keys are left alone. `ctx.userName` and `ctx.userDisplayName`,
-  /// set only by `SealedTrace.setUser`, are sent as given so the console can
-  /// show who each user is; `MaskConfig.maskUserName` replaces `userName`.
+  /// context keys are left alone. `ctx.userName` is replaced when
+  /// `MaskConfig.maskUserName` is true (the default) and sent as given
+  /// otherwise. `ctx.userDisplayName`, set only by `SealedTrace.setUser` and
+  /// only when `SealedTraceConfig.sendUserDisplayName` is true, is sent as
+  /// given.
   LogRecord maskRecord(LogRecord record) {
     final seen = HashSet<Object>.identity();
     final ctx = <String, dynamic>{};

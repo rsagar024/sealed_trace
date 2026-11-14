@@ -13,14 +13,14 @@ First release.
   `SealedTraceEnv('qa')` or `SealedTraceEnv(appFlavor ?? 'dev')` with Flutter
   flavors. Names are 1 to 32 characters of `a-z`, `0-9`, `_` or `-`; any other
   name leaves the SDK disabled. See "Environments & flavors" in the README.
-- **Readable user names in the console.** `setUser(id, name: ...)` trims the
-  name, cuts it to 256 characters and sends it as given in `ctx.userName` and
-  `ctx.userDisplayName`, inside the sealed envelope, so the console shows who
-  each user is. Blank names are not sent, and `setUser(null)` clears both.
-  Only `setUser` sets `userDisplayName`; a value passed to `setContext` is
-  ignored. `MaskConfig(maskUserName: true)` sends `***` in `ctx.userName`, and
-  `SealedTraceConfig(sendUserDisplayName: false)` never sends
-  `userDisplayName`.
+- **Readable user names in the console, opt-in.** `setUser(id, name: ...)`
+  trims the name and cuts it to 256 characters. By default it stays on the
+  device: `ctx.userName` is `***` and `ctx.userDisplayName` is not sent.
+  `SealedTraceConfig(sendUserDisplayName: true)` sends it as
+  `ctx.userDisplayName` for the Users tab, and
+  `MaskConfig(maskUserName: false)` sends it in `ctx.userName`. Blank names
+  are not sent, and `setUser(null)` clears both. Only `setUser` sets
+  `userDisplayName`; a value passed to `setContext` is ignored.
 - **Never throws, zero cost when disabled.** Every public call is guarded.
   With `enabled: false`, or below `minLevel`, a call returns before anything
   is allocated.
@@ -97,3 +97,8 @@ First release.
   (rate limits per key and IP, treating decrypted content as untrusted, key
   rotation) and the optional attestation hook. If the attestation provider
   fails, nothing is sent and no attempt is counted. Examples use `pk_live_…`.
+- **User names are private by default.** `MaskConfig.maskUserName` now
+  defaults to `true` and `SealedTraceConfig.sendUserDisplayName` to `false`,
+  so a name passed to `setUser` is not sent readable unless the app opts in
+  (privacy by default, GDPR Art. 25). The dartdoc that said `ctx.userName`
+  "stays masked" under the old defaults is corrected.
