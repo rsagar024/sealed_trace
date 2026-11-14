@@ -52,7 +52,9 @@ First release.
   - SQLite (drift) on native platforms, IndexedDB on the web.
   - Retention by count, age and size, with an emergency purge when storage is
     full.
-  - Corruption recovery and a memory fallback.
+  - Corruption recovery and a memory fallback. Copies of a corrupt
+    database are deleted after 7 days (at most 3 kept) and by
+    `clearLocalLogs`.
   - The sequence counter persists across restarts.
 - **Reliable upload** to `POST {baseUrl}/api/v1/ingest/logs`.
   - At most 50 envelopes and 2 MB per request.
@@ -158,6 +160,11 @@ First release.
   `minTs`, `maxTs` are 0 and `topLevels` is empty), so a dump of the database
   no longer shows whether a `fatal` occurred. The vectors and their spec are
   updated.
+- **Corrupt-database copies no longer pile up.** When a corrupt
+  `sealed_trace.db` is set aside, its `.corrupt-<time>` copy (with `-wal`
+  and `-shm`) is now deleted at a later successful open once it is 7 days
+  old, at most 3 are kept, and `clearLocalLogs()` deletes them all, so a
+  previous user's sealed data does not stay on disk after sign-out.
 - **Strict DER parsing.** Public keys (and certificates for pinning) must be
   strict DER: low tag numbers only, definite and minimal lengths of at most
   3 bytes, and INTEGERs without redundant leading zeros. A huge long-form

@@ -5,6 +5,7 @@ import '../model/log_level.dart';
 import '../platform/connectivity_monitor.dart';
 import '../storage/storage_service.dart';
 import '../upload/upload_scheduler.dart';
+import '../storage/open_storage.dart';
 
 /// State of an initialized SDK. Internal.
 ///
@@ -99,11 +100,16 @@ class Runtime {
   /// forward so numbers are never reused.
   Future<void> clearLocal() async {
     final pipeline = this.pipeline;
-    if (pipeline == null) return;
-    pipeline.queue.discardPending();
-    pipeline.pageExitSaver?.clear();
-    await pipeline.queue.settle();
-    await storage?.clear();
+    if (pipeline != null) {
+      pipeline.queue.discardPending();
+      pipeline.pageExitSaver?.clear();
+      await pipeline.queue.settle();
+      await storage?.clear();
+    }
+    // Copies of a corrupt database hold the previous user's sealed data too.
+    await deleteCorruptDatabaseCopies(
+      databaseDirectory: config.databaseDirectory,
+    );
   }
 
   /// Stops uploads, drains the queue to storage, then stops retention and

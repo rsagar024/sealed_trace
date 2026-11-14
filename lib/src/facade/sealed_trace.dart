@@ -279,7 +279,9 @@ abstract final class SealedTrace {
     return uploader.request(UploadTrigger.manual);
   }
 
-  /// Deletes all locally stored logs, for example on logout.
+  /// Deletes all locally stored logs, for example on logout: the queue, the
+  /// web spill, every stored envelope, and any copies of a corrupt database
+  /// that were set aside.
   ///
   /// Never completes with an error.
   static Future<void> clearLocalLogs() async {
