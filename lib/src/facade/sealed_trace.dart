@@ -264,21 +264,31 @@ abstract final class SealedTrace {
 
   /// Adds a [pattern] whose matches are masked in every string value.
   ///
+  /// The pattern runs synchronously on every logged string, so it must not
+  /// backtrack catastrophically. A pattern with nested repetition (`(a+)+`),
+  /// repeated alternation (`(a|b)*`) or a backreference, or one that matches
+  /// the empty string, is ignored and reported through [onException]. Prefer
+  /// a literal prefix and bounded quantifiers, such as `\bORD-\d{6}\b`.
+  ///
   /// No-op before [init].
   static void addMaskPattern(RegExp pattern) {
     final runtime = _runtime;
     if (runtime == null) return;
     try {
       final masking = runtime.pipeline?.masking;
-      if (masking != null && !masking.addPattern(pattern)) {
+      if (masking == null) return;
+      final problem = MaskingEngine.patternProblem(pattern);
+      if (problem != null) {
         _report(
           ArgumentError.value(
             pattern.pattern,
             'pattern',
-            'Mask pattern ignored: it matches the empty string',
+            'Mask pattern ignored: $problem',
           ),
           StackTrace.current,
         );
+      } else {
+        masking.addPattern(pattern);
       }
     } catch (error, stack) {
       _report(error, stack);

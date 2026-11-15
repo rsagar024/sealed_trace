@@ -167,6 +167,14 @@ First release.
   pseudonym. On the web, `ctx.os` is now only the browser, its major version
   and the OS (`Chrome 157 on Windows`), not up to 120 characters of user
   agent.
+- **Custom mask patterns can no longer freeze the app.** `extraPatterns` and
+  `addMaskPattern` now refuse patterns that can backtrack exponentially:
+  nested repetition (`(a+)+`), repeated alternation (`(a|b)*`) and
+  backreferences. They are ignored and reported through `onException` with
+  the reason. Before, `(a+)+$` blocked the calling thread for about 3 s on
+  25 characters, doubling with each extra character. Polynomial patterns
+  such as `.*x` are not detected; the README explains how to write safe
+  patterns.
 - **Web uploads batch again.** The upload cycle bounded its candidate rows
   with `1 << 40`, which dart2js evaluates to 0 (32-bit shifts), so web
   clients sent one envelope per request. The bound is now the 2 MB request

@@ -159,6 +159,40 @@ void main() {
     },
   );
 
+  test(
+    'L13: an unsafe pattern is reported with its reason and ignored',
+    () async {
+      final errors = <Object>[];
+      SealedTrace.onException = (e, _) => errors.add(e);
+      await _init();
+      SealedTrace.addMaskPattern(RegExp(r'(a+)+$'));
+      expect(errors, hasLength(1));
+      final error = errors.single as ArgumentError;
+      expect(error.invalidValue, r'(a+)+$');
+      expect(error.message, contains('nested repetition'));
+
+      final watch = Stopwatch()..start();
+      final evil = '${'a' * 40}!';
+      SealedTrace.i('t', evil);
+      await SealedTrace.flush();
+      expect(watch.elapsedMilliseconds, lessThan(2000));
+      expect(sink.records.single.message, evil);
+    },
+  );
+
+  test('L13: an unsafe config pattern is reported at init', () async {
+    final errors = <Object>[];
+    SealedTrace.onException = (e, _) => errors.add(e);
+    await _init(
+      _config.copyWith(
+        maskConfig: MaskConfig(extraPatterns: [RegExp(r'(x|xy)*z')]),
+      ),
+    );
+    expect(errors.whereType<ArgumentError>().map((e) => '${e.message}'), [
+      contains('repeated alternation'),
+    ]);
+  });
+
   test('masking does not change ids, sequence or timestamps', () async {
     await _init();
     SealedTrace.i('t', 'a@b.com');

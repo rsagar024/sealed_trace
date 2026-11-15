@@ -7,6 +7,7 @@ import 'default_keys.dart';
 import 'default_patterns.dart';
 import 'credential_pass.dart';
 import 'header_redactor.dart';
+import 'pattern_safety.dart';
 import 'url_redactor.dart';
 
 /// Redacts PII before an event is sealed. Also used for network logs.
@@ -42,8 +43,17 @@ class MaskingEngine {
       ..addAll(config.extraHeaderDenylist.map(_headerName));
     if (config.useDefaultPatterns) _rules.addAll(buildDefaultRules());
     for (final pattern in config.extraPatterns) {
-      if (!addPattern(pattern)) {
-        _report(ArgumentError('Ignored an unusable mask pattern'));
+      final problem = patternProblem(pattern);
+      if (problem != null) {
+        _report(
+          ArgumentError.value(
+            pattern.pattern,
+            'pattern',
+            'Mask pattern ignored: $problem',
+          ),
+        );
+      } else {
+        _addRule(pattern);
       }
     }
   }
@@ -124,19 +134,37 @@ class MaskingEngine {
   /// `.` and whitespace.
   void addKeys(Iterable<String> keys) => _keys.addAll(keys.map(_normalize));
 
+  /// Why [pattern] cannot be used as a mask pattern, or null when it can.
+  ///
+  /// A pattern is refused when it matches the empty string (which would
+  /// corrupt every string), cannot be tested safely, or can backtrack
+  /// exponentially: nested repetition such as `(a+)+`, repeated alternation
+  /// such as `(a|b)*`, or a backreference. Custom patterns run synchronously
+  /// on every logged string, so such a pattern could freeze the app (L13).
+  static String? patternProblem(RegExp pattern) {
+    final unsafe = unsafePatternReason(pattern.pattern);
+    if (unsafe != null) return unsafe;
+    try {
+      if (pattern.hasMatch('')) return 'it matches the empty string';
+    } catch (_) {
+      return 'it could not be tested';
+    }
+    return null;
+  }
+
   /// Adds a pattern whose matches are replaced in every string.
   ///
-  /// Returns false, and ignores the pattern, if it matches the empty string
-  /// (which would corrupt every string) or cannot be tested safely.
+  /// Returns false, and ignores the pattern, when [patternProblem] finds a
+  /// problem with it.
   bool addPattern(RegExp pattern) {
-    try {
-      if (pattern.hasMatch('')) return false;
-    } catch (_) {
-      return false;
-    }
+    if (patternProblem(pattern) != null) return false;
+    _addRule(pattern);
+    return true;
+  }
+
+  void _addRule(RegExp pattern) {
     _rules.add(MaskRule(pattern, (m, replacement) => replacement));
     _extraPatterns.add(pattern);
-    return true;
   }
 
   /// The exact sensitive keys currently in force, normalized: the defaults,

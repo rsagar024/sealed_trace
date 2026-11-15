@@ -258,7 +258,7 @@ Two rules to know up front:
 | Field | Default | Meaning |
 |---|---|---|
 | `extraKeys` | `[]` | More keys whose values are replaced. Matching is on the whole key, ignoring case and the separators `_`, `-`, `.` and spaces, so `national_id` also matches `nationalId`. |
-| `extraPatterns` | `[]` | More `RegExp`s applied to every string. |
+| `extraPatterns` | `[]` | More `RegExp`s applied to every string. Patterns that can backtrack exponentially (nested repetition such as `(a+)+`, repeated alternation such as `(a\|b)*`, backreferences) or that match the empty string are ignored and reported through `onException`. See [Limits](#mask-pattern-limits). |
 | `extraHeaderDenylist` | `[]` | More header names to mask in network logs. |
 | `useDefaultKeys` | `true` | Exact keys (separators and case ignored): `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv`, `username`, `otp`, `pin`, `mpin`, `cvc`, `session`, `sessionId`, `sid`, `cardNumber`, `ccNumber`, `client_secret`, `authCode`, `iban`, `passport`, `passportNumber`, `passportNo`, `aadhaar`, `aadhar`, `aadhaarNumber`, `panNumber`, `panCard`, `nationalId`, `taxId`, `ip`, `ipAddress`, `clientIp`. Plus any key that **contains** `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `apikey`, `privatekey`, `authorization`, `cookie` or `jwt` (`idToken`, `x-csrf-token`, `oldPassword`), or **ends with** `auth` (`oauth`, `basicAuth`; not `author`). |
 | `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens; API keys with a known prefix (AWS `AKIA…`, Stripe `sk_`/`rk_live_…`, GitHub `ghp_…`/`github_pat_…`, Google `AIza…`, Slack `xox…-`, GitLab `glpat-`); IBANs (mod-97 checked); dashed US SSNs; Aadhaar numbers (Verhoeff checked); Indian PAN; IPv4 and IPv6 addresses; email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. All apply to every string and to map keys. |
@@ -345,7 +345,7 @@ SealedTrace.log(LogEvent(level: LogLevel.warning, tag: 'tag', message: 'message'
 SealedTrace.setUser('user-42', name: 'Asha');   // sent as *** unless you opt in (sendUserDisplayName, maskUserName)
 SealedTrace.setContext({'deviceId': id, 'deviceModel': model});   // required keys; extra keys are allowed
 SealedTrace.addMaskKeys(['iban']);
-SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));
+SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));   // unsafe or empty-matching patterns are reported, not added
 
 // Delivery and local data.
 final UploadResult result = await SealedTrace.flush();   // outcome, accepted, duplicate, rejected, failed
@@ -577,6 +577,13 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   `loyaltyId`. Add such keys with `extraKeys` or `addMaskKeys`. JWTs and `Bearer` tokens are masked in every
   string whatever the key.
 - **Fragment matching can over-mask**: `passwordHint` or `tokenCount` are masked too.
+- <a id="mask-pattern-limits"></a>**Custom mask patterns run on the calling thread, on every string of up to
+  100,000 characters.** A pattern that can backtrack exponentially is refused (ignored and reported through
+  `onException`): a repeated group that itself contains `?`, `*`, `+` or `{n,m}` (`(a+)+`, `(\w+\s?)*`,
+  `(a?){30}`), a repeated group containing `|` (`(a|b)*`), and backreferences (`\1`, `\k<name>`). The check is
+  conservative: unroll safe repeats such as `(?:\.\d{1,3}){3}` into `\.\d{1,3}\.\d{1,3}\.\d{1,3}`. It does not
+  catch **polynomial** cost: `.*x` or `[A-Z]+-` can take seconds on a long run of matching characters. Start
+  patterns with a literal or `\b`, use bounded quantifiers (`\d{6}`, `{1,32}`), and avoid leading `.*`.
 - **`userId`, `tag` and the device context are never masked.** Don't put personal data in them; send ids as
   `SealedTrace.pseudonym(...)` or set `MaskConfig(pseudonymizeUserId: true)`. On the web `os` is only the browser,
   its major version and the OS (for example `Chrome 157 on Windows`), never the full user agent. A name passed to

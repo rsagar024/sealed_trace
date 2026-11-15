@@ -20,6 +20,14 @@ class MaskConfig {
   final List<String> extraKeys;
 
   /// Extra patterns whose matches are replaced in every string value.
+  ///
+  /// They run synchronously on every logged string (up to 100,000
+  /// characters), so they must not backtrack catastrophically. A pattern
+  /// with nested repetition (`(a+)+`, `(\w+\s?)*`, `(a?){30}`), repeated
+  /// alternation (`(a|b)*`) or a backreference (`\1`), or one that matches
+  /// the empty string, is ignored and reported through
+  /// `SealedTrace.onException`. Prefer a literal prefix and bounded
+  /// quantifiers, such as `\bORD-\d{6}\b`; avoid leading `.*`.
   final List<RegExp> extraPatterns;
 
   /// Extra header names to redact, in addition to the built-in denylist.
