@@ -512,10 +512,16 @@ and add the flavor. Flavor names must follow the `env` rules (lowercase, 1–32 
 
 - Use an `https` `baseUrl`. The SDK rejects `http` outside `dev`/`local` envs, and Android blocks plain HTTP unless you add a network security config.
 - Release builds with R8 need no keep rules for this package.
+- The database (`sealed_trace.db*` in the app's files directory) holds only ciphertext, but Android Auto Backup
+  copies it to the user's cloud account and restores it onto other devices. Set `android:allowBackup="false"` or
+  exclude it with `android:dataExtractionRules` / `android:fullBackupContent`. The example app turns backup off.
+- The example app signs release builds with the **debug key** so `flutter run --release` works. Never copy that into
+  a shipped app; use your own release keystore.
 
 ### iOS and macOS
 
-- iOS needs no extra setup.
+- iOS needs no extra setup. The database lives in Application Support, which iOS includes in iCloud and device
+  backups; it holds only ciphertext, but you can exclude it with `NSURLIsExcludedFromBackupKey`.
 - macOS: add `com.apple.security.network.client` = `true` to both `DebugProfile.entitlements` and
   `Release.entitlements`.
 
