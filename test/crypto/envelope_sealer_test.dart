@@ -11,6 +11,7 @@ import 'package:sealed_trace/src/event/log_record.dart';
 import 'package:sealed_trace/src/model/sealed_envelope.dart';
 
 import '../helpers/envelope_opener.dart';
+import '../helpers/envelopes.dart';
 import '../helpers/fakes.dart';
 import '../helpers/test_keys.dart';
 
@@ -309,22 +310,24 @@ void main() {
       }
     });
 
-    test('the v2 AAD encoding (no kid) is the documented six lines', () {
+    test('the default alg is RSA-2048', () {
       final aad = envelopeAad(
         projectId: 'p-1',
         batchId: 'b-1',
         createdAt: '2026-01-01T10:00:05.000Z',
         eventCount: 3,
+        kid: 'k',
       );
       expect(
-        utf8.decode(aad),
-        'sealed_trace.envelope.v2\n'
-        'RSA-OAEP-2048-SHA256+AES-256-GCM\n'
-        'p-1\n'
-        'b-1\n'
-        '2026-01-01T10:00:05.000Z\n'
-        '3',
+        utf8.decode(aad).split('\n')[1],
+        'RSA-OAEP-2048-SHA256+AES-256-GCM',
       );
+    });
+
+    test('a v1 envelope (no kid) has no AAD', () {
+      final legacy = makeEnvelope(kid: null);
+      expect(legacy.version, 1);
+      expect(legacy.aad, isEmpty);
     });
 
     test('a field with a line break is refused', () {
@@ -334,6 +337,7 @@ void main() {
           batchId: 'b',
           createdAt: 'c',
           eventCount: 1,
+          kid: 'k',
         ),
         throwsArgumentError,
       );

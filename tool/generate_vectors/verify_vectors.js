@@ -18,8 +18,8 @@ function kidOf(key) {
   return crypto.createHash('sha256').update(spki).digest().subarray(0, 16).toString('base64url');
 }
 
-// The server's key ring: private keys by kid. v2 envelopes (no kid) were
-// always sealed to the RSA-2048 key.
+// The server's key ring: private keys by kid. v1 envelopes (sealed_trace
+// 1.0.0, no kid) were always sealed to the RSA-2048 key.
 const keyRing = new Map();
 for (const pem of [doc.testOnlyKeys.privateKeyPkcs8, doc.testOnlyKeys.privateKey3072Pkcs8]) {
   const key = crypto.createPrivateKey(pem);
@@ -70,12 +70,13 @@ for (const c of doc.rsaOaepWrapCases || []) {
 // The additional authenticated data, rebuilt from the clear header fields
 // exactly as a server would (see specification.aad).
 function envelopeAad(e) {
-  const lines = e.kid === undefined
-    ? ['sealed_trace.envelope.v2', e.alg, e.projectId, e.batchId, e.createdAt,
-      String(e.eventCount)]
-    : ['sealed_trace.envelope.v3', e.alg, e.projectId, e.batchId, e.createdAt,
-      String(e.eventCount), e.kid];
-  return Buffer.from(lines.join('\n'), 'utf8');
+  // v1 (sealed_trace 1.0.0) has no AAD.
+  if (e.v === 1) return Buffer.alloc(0);
+  return Buffer.from(
+    ['sealed_trace.envelope.v3', e.alg, e.projectId, e.batchId, e.createdAt,
+      String(e.eventCount), e.kid].join('\n'),
+    'utf8',
+  );
 }
 
 function openEnvelope(e, key, aad) {
@@ -108,7 +109,7 @@ function fails(fn) {
 
 for (const c of doc.envelopes) {
   const e = c.envelope;
-  const legacy = e.v === 2;
+  const legacy = e.v === 1;
   const wire = ['v', 'batchId', 'projectId', 'createdAt', 'eventCount', 'alg',
     ...(legacy ? [] : ['kid']), 'wrappedKey', 'iv', 'tag', 'ciphertext'];
   check(`${c.name}: wire keys`, JSON.stringify(Object.keys(e)) === JSON.stringify(wire));
@@ -123,7 +124,7 @@ for (const c of doc.envelopes) {
   check(`${c.name}: aadUtf8 matches the rebuilt AAD`, envelopeAad(e).toString('utf8') === c.aadUtf8);
   check(`${c.name}: sizes`, iv.length === 12 && tag.length === 16);
 
-  // Pick the private key the way a server would: by kid, or the 2048 key for v2.
+  // Pick the private key the way a server would: by kid, or the 2048 key for v1.
   const ringKey = legacy ? privateKey : keyRing.get(e.kid);
   check(`${c.name}: kid names a known key`, ringKey !== undefined, e.kid);
   if (ringKey === undefined) continue;
@@ -142,16 +143,28 @@ for (const c of doc.envelopes) {
 
   try {
     const plain = openEnvelope(e, key, envelopeAad(e));
-    // L6: the JSON is followed by spaces up to its Padme length.
+    // L6: the JSON is followed by spaces up to its Padme length (v3; 1.0.0
+    // did not pad).
     const json = Buffer.byteLength(c.plaintextJson, 'utf8');
+    const expected = legacy ? json : padme(json);
     check(`${c.name}: decrypt`, plain.slice(0, c.plaintextJson.length) === c.plaintextJson &&
       /^ *$/.test(plain.slice(c.plaintextJson.length)));
-    check(`${c.name}: padded to the Padme length`,
-      Buffer.byteLength(plain, 'utf8') === padme(json) && padme(json) === c.paddedLength);
+    check(`${c.name}: ${legacy ? 'not padded' : 'padded to the Padme length'}`,
+      Buffer.byteLength(plain, 'utf8') === expected && expected === c.paddedLength);
     check(`${c.name}: plaintext is a JSON array of ${e.eventCount}`,
       Array.isArray(JSON.parse(plain)) && JSON.parse(plain).length === e.eventCount);
   } catch (err) {
     check(`${c.name}: decrypt`, false, err.message);
+  }
+
+  if (legacy) {
+    // v1 has no AAD, so its clear header is NOT authenticated (the M1
+    // weakness): accept v1 only for a transition window. It can't be passed
+    // off as v3 either.
+    const asV3 = { ...e, v: 3, kid: kidOf(privateKey) };
+    check(`${c.name}: relabelled as v3 fails`,
+      fails(() => openEnvelope(asV3, key, envelopeAad(asV3))));
+    continue;
   }
 
   // M1: any change to the clear header must break decryption.
@@ -161,13 +174,18 @@ for (const c of doc.envelopes) {
     ['projectId', '11111111-1111-4111-8111-111111111111'],
     ['createdAt', '2020-01-01T00:00:00.000Z'],
     ['eventCount', e.eventCount + 1],
-    // I3: kid is authenticated; adding one to a v2 envelope also fails.
-    ['kid', legacy ? 'i5AhdjEFUP1jG9OUOECv9Q' : 'AAAAAAAAAAAAAAAAAAAAAA'],
+    // I3: the kid is authenticated.
+    ['kid', 'AAAAAAAAAAAAAAAAAAAAAA'],
   ]) {
     const forged = { ...e, [field]: value };
     check(`${c.name}: changed ${field} fails`,
       fails(() => openEnvelope(forged, key, envelopeAad(forged))));
   }
+  // A v3 envelope can't be downgraded to v1 (which has no AAD).
+  const asV1 = { ...e, v: 1 };
+  delete asV1.kid;
+  check(`${c.name}: downgraded to v1 fails`,
+    fails(() => openEnvelope(asV1, key, envelopeAad(asV1))));
 }
 
 console.log(failures === 0 ? '\nAll vectors verified.' : `\n${failures} check(s) failed.`);

@@ -108,9 +108,10 @@ Future<Map<String, dynamic>> _envelopeCase(
   return _caseJson(name, description, records, key, envelope);
 }
 
-/// A v2 envelope exactly as a pre-I3 build sealed it (no kid, v2 AAD), which
-/// the SDK still sends for rows stored before the upgrade.
-Future<Map<String, dynamic>> _legacyV2Case(
+/// A v1 envelope exactly as sealed_trace 1.0.0 sealed it: RSA-2048, no kid,
+/// AES-GCM with no AAD and no padding. The SDK still sends rows that a 1.0.0
+/// install left on the device in this form.
+Future<Map<String, dynamic>> _legacyV1Case(
   String name,
   String description,
   List<LogRecord> records,
@@ -118,10 +119,9 @@ Future<Map<String, dynamic>> _legacyV2Case(
 ) async {
   final key = _bytes(32, seed, 7);
   final iv = _bytes(12, seed + 1, 13);
-  final json = utf8.encode(jsonEncode([for (final r in records) r.toJson()]));
-  final padded = Uint8List(padmeLength(json.length))
-    ..fillRange(0, padmeLength(json.length), 0x20)
-    ..setRange(0, json.length, json);
+  final padded = Uint8List.fromList(
+    utf8.encode(jsonEncode([for (final r in records) r.toJson()])),
+  );
   final createdAt = DateTime.utc(2026, 1, 1, 10, 0, 5);
   final batchId = '7c9e6679-7425-40de-944b-e07fc1f90ae${seed % 10}';
   final backend = DefaultCryptoBackend();
@@ -129,12 +129,7 @@ Future<Map<String, dynamic>> _legacyV2Case(
     key: key,
     iv: iv,
     plaintext: padded,
-    aad: envelopeAad(
-      projectId: _projectId,
-      batchId: batchId,
-      createdAt: envelopeCreatedAt(createdAt),
-      eventCount: records.length,
-    ),
+    aad: Uint8List(0),
   );
   final envelope = SealedEnvelope(
     batchId: batchId,
@@ -332,11 +327,13 @@ Future<void> main() async {
       6,
       publicKeyPem: testPublicKey3072,
     ),
-    await _legacyV2Case(
-      'legacy_v2_no_kid',
-      'I3: an envelope stored by a v2 build before the upgrade. It has no kid, '
-          'v is 2 and the AAD is the six-line v2 form. Servers must still '
-          'accept it.',
+    await _legacyV1Case(
+      'legacy_v1_no_aad',
+      'An envelope left on the device by a sealed_trace 1.0.0 install and '
+          'sent after the app is upgraded: v is 1, no kid, RSA-2048, AES-GCM '
+          'with NO additional authenticated data and no padding '
+          '(paddedLength is the JSON length). Servers must keep accepting it '
+          'during the transition.',
       [
         _record(
           seq: 3,
@@ -383,7 +380,7 @@ Future<void> main() async {
 
   final document = <String, dynamic>{
     'description': <String>[
-      'Golden test vectors for the sealed_trace envelope format (v2).',
+      'Golden test vectors for the sealed_trace envelope format (v3, plus a legacy v1 case).',
       'TEST ONLY: the private key below is published on purpose and protects nothing.',
       'RSA-OAEP is randomized, so wrappedKey differs on every encryption. '
           'Verify envelopes by DECRYPTING them, not by comparing wrappedKey bytes.',
@@ -404,7 +401,7 @@ Future<void> main() async {
       'padding':
           'paddedLength is 256 if L <= 256; otherwise, with '
           'E = floor(log2 L), S = floor(log2 E) + 1, '
-          'mask = 2^(E - S) - 1, paddedLength = (L + mask) & ~mask '
+          'mask = 2^(E - S) - 1, paddedLength = (L + mask) & ~mask (v3 only; v1 is not padded) '
           '(Nikitin et al., PETS 2019). L is the JSON length in bytes. Each '
           'case lists plaintextJson (unpadded) and paddedLength.',
       'aes':
@@ -414,17 +411,15 @@ Future<void> main() async {
       'aad':
           'UTF-8 bytes of lines joined by a single LF (0x0A), no trailing LF. '
           'v3: "sealed_trace.envelope.v3", then alg, projectId, batchId, '
-          'createdAt, eventCount and kid. v2 (no kid): '
-          '"sealed_trace.envelope.v2", then alg, projectId, batchId, '
-          'createdAt and eventCount. Every value exactly as it appears in the '
+          'createdAt, eventCount and kid, every value exactly as it appears in the '
           'wire JSON (eventCount in decimal). Rebuild it from the received '
           'fields; any change to them makes the tag check fail. v1 envelopes '
-          'had no AAD.',
+          '(sealed_trace 1.0.0, no kid) have no AAD.',
       'kid':
           'v3 only. The first 16 bytes of SHA-256 over the DER '
           'SubjectPublicKeyInfo of the project public key, base64url without '
           'padding (22 characters). The server picks the private key by kid; '
-          'a v2 envelope has no kid and was sealed to the RSA-2048 key in use '
+          'a v1 envelope has no kid and was sealed to the RSA-2048 key in use '
           'at the time.',
       'rsa':
           'RSA-OAEP over the 32-byte AES key: SHA-256 label hash, MGF1 with '
@@ -435,7 +430,7 @@ Future<void> main() async {
           'UTC ISO-8601 with milliseconds, e.g. 2026-01-01T10:00:05.000Z.',
       'alg':
           'RSA-OAEP-<bits>-SHA256+AES-256-GCM with <bits> 2048, 3072 or '
-          '4096; always 2048 for v2.',
+          '4096; always 2048 for v1.',
     },
     'verification': <String, dynamic>{
       'openssl': <String>[

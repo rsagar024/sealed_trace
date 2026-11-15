@@ -42,8 +42,8 @@ First release.
 - **Hybrid encryption per batch.**
   - AES-256-GCM with a fresh key, wrapped with the project's RSA-2048 public
     key (RSA-OAEP, SHA-256).
-  - Envelope format v2: the clear header (`alg`, `projectId`, `batchId`,
-    `createdAt`, `eventCount`) is authenticated as AES-GCM AAD. Known-answer
+  - Envelope format v3: the clear header (`alg`, `projectId`, `batchId`,
+    `createdAt`, `eventCount`, `kid`) is authenticated as AES-GCM AAD. Known-answer
     vectors in
     `test/vectors/envelope_vectors.json`.
   - Large batches are sealed in a background isolate on native platforms
@@ -171,10 +171,12 @@ First release.
   `kid`, the project key's identifier (first 16 bytes of SHA-256 over its DER
   SubjectPublicKeyInfo, base64url), on the wire and as a seventh AAD line, so
   a server can pick the right private key after a key rotation. RSA keys of
-  3072 and 4096 bits are accepted; `alg` names the size. Rows stored by an
-  earlier build are still sent as v2 exactly as they were sealed. The SQLite
-  schema moves to version 2 (a nullable `kid` column). **The server must
-  accept v3 and v2.**
+  3072 and 4096 bits are accepted; `alg` names the size. Rows that an
+  earlier 1.0.0 build (envelope v1) left on the device are still sent as v1,
+  exactly as they were sealed (no AAD), as is its `localStorage` spill. The
+  SQLite schema moves to version 2 (a nullable `kid` column). **The server
+  must accept v3, and v1 for a transition window**; see the README's
+  "Server changes".
 - **The test key cannot ship.** Release builds (`kReleaseMode`) refuse the
   repository's test RSA key, whose private key is public: `init` reports it
   through `onException` and leaves the SDK disabled. `test/` and `tool/`,

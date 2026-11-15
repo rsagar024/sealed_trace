@@ -143,31 +143,23 @@ void main() {
     });
   });
 
-  group('legacy v2 envelopes', () {
-    test('a row sealed by a v2 build still opens as v2', () async {
-      // Seal exactly as the v2 SDK did: v2 AAD, no kid.
+  group('legacy v1 envelopes (left by sealed_trace 1.0.0)', () {
+    // Seal exactly as versions/v1.0.0 did: RSA-2048, AES-GCM with no AAD.
+    SealedEnvelope sealLikeV100() {
       final backend = DefaultCryptoBackend();
       final aesKey = backend.randomBytes(32);
       final iv = backend.randomBytes(12);
-      final createdAt = DateTime.utc(2026, 1, 1, 10);
       final plaintext = Uint8List.fromList(utf8.encode('[{"seq":1}]'));
-      final aad = envelopeAad(
-        projectId: 'project-1',
-        batchId: 'old-1',
-        createdAt: envelopeCreatedAt(createdAt),
-        eventCount: 1,
-      );
-      expect(utf8.decode(aad), startsWith('sealed_trace.envelope.v2\n'));
       final sealed = backend.aesGcmEncryptSync(
         key: aesKey,
         iv: iv,
         plaintext: plaintext,
-        aad: aad,
+        aad: Uint8List(0),
       );
-      final legacy = SealedEnvelope(
+      return SealedEnvelope(
         batchId: 'old-1',
         projectId: 'project-1',
-        createdAt: createdAt,
+        createdAt: DateTime.utc(2026, 1, 1, 10),
         eventCount: 1,
         wrappedKey: backend.rsaOaepWrap(
           PublicKeyParser.parse(testPublicKeySpki),
@@ -176,22 +168,62 @@ void main() {
         iv: iv,
         tag: sealed.tag,
         ciphertext: sealed.ciphertext,
-        seqMin: 0,
-        seqMax: 0,
-        minTs: 0,
-        maxTs: 0,
-        topLevels: '',
+        seqMin: 1,
+        seqMax: 1,
+        minTs: 1767261600000,
+        maxTs: 1767261600000,
+        topLevels: 'info',
         payloadSize: plaintext.length,
       );
-      final wire = legacy.toWireJson();
-      expect(wire['v'], 2);
-      expect(wire.containsKey('kid'), isFalse);
+    }
+
+    test('a stored v1.0.0 row is sent exactly as 1.0.0 sent it', () async {
+      final wire = sealLikeV100().toWireJson();
+      expect(wire.keys.toList(), [
+        'v',
+        'batchId',
+        'projectId',
+        'createdAt',
+        'eventCount',
+        'alg',
+        'wrappedKey',
+        'iv',
+        'tag',
+        'ciphertext',
+      ]);
+      expect(wire['v'], 1);
+      expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
+      // It opens with no AAD, as a v1 server decrypts it.
       expect(await openWire(wire), '[{"seq":1}]');
+    });
+
+    test('labelling it v3 would not open (it has no AAD)', () async {
+      final e = sealLikeV100();
+      final asV3 = {...e.toWireJson(), 'v': 3, 'kid': testKeyId};
+      await expectLater(openWire(asV3), throwsA(anything));
+    });
+
+    test('a 1.0.0 page-exit spill entry is recovered as v1', () {
+      final e = sealLikeV100();
+      // The spill format of versions/v1.0.0: wire JSON plus index columns.
+      final text = jsonEncode({
+        ...e.toWireJson(),
+        'seqMin': 1,
+        'seqMax': 1,
+        'minTs': 1767261600000,
+        'maxTs': 1767261600000,
+        'topLevels': 'info',
+        'payloadSize': e.payloadSize,
+      });
+      final back = decodeSpilledEnvelope(text);
+      expect(back.kid, isNull);
+      expect(back.version, 1);
+      expect(back.toWireJson(), e.toWireJson());
     });
   });
 
   group('spill', () {
-    test('v3, legacy v2 and 3072-bit envelopes round-trip', () {
+    test('v3, legacy v1 and 3072-bit envelopes round-trip', () {
       for (final e in [
         makeEnvelope(kid: testKeyId),
         makeEnvelope(kid: null),
@@ -215,15 +247,16 @@ void main() {
 
     test('inconsistent version, kid and algorithm are rejected', () {
       final v3 = spilled(makeEnvelope());
-      final v2 = spilled(makeEnvelope(kid: null));
+      final v1 = spilled(makeEnvelope(kid: null));
       rejects({...v3}..remove('kid'), 'v3 without kid');
-      rejects({...v2, 'kid': testKeyId}, 'v2 with kid');
+      rejects({...v1, 'kid': testKeyId}, 'v1 with kid');
+      rejects({...v1, 'v': 2}, 'v2 (never released)');
       rejects({...v3, 'v': 4}, 'unknown version');
       rejects({...v3, 'kid': 'not base64url!'}, 'bad kid');
       rejects({...v3, 'alg': 'RSA-OAEP-3072-SHA256+AES-256-GCM'}, 'alg/size');
       rejects(
         spilled(makeEnvelope(kid: null, wrappedKeyLength: 384)),
-        'v2 with a 3072-bit key',
+        'v1 with a 3072-bit key',
       );
       rejects(spilled(makeEnvelope(wrappedKeyLength: 300)), 'odd key size');
     });
@@ -235,9 +268,9 @@ void main() {
     setUp(() => dir = Directory.systemTemp.createTempSync('st_migrate'));
     tearDown(() => dir.deleteSync(recursive: true));
 
-    test('a schema-1 row survives the upgrade and reads back as v2', () async {
+    test('a schema-1 row survives the upgrade and reads back as v1', () async {
       final file = File('${dir.path}/sealed_trace.db');
-      // Build a schema-1 database as a v2 build of the SDK left it.
+      // Build a schema-1 database as a 1.0.0 build of the SDK left it.
       final v1 = NativeDatabase(
         file,
         setup: (db) {

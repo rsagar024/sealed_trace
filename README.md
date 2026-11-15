@@ -130,14 +130,15 @@ recovery and the memory fallback are tested on the Dart VM on Windows.
 | Flutter / Dart | Flutter **3.38.1+** / Dart **3.10+** |
 | Android | **minSdk 24** (Flutter's default), `INTERNET` and `ACCESS_NETWORK_STATE` in the main manifest |
 | iOS / macOS | no extra setup on iOS; macOS needs the `com.apple.security.network.client` entitlement |
-| Web | any modern browser with IndexedDB; the server must allow CORS for `X-Api-Key` and `Content-Type` |
+| Web | any modern browser with IndexedDB; the server must allow CORS for `X-Api-Key` and `Content-Type` (and `X-SealedTrace-Attestation` if you use attestation) |
 | Desktop / mobile SQLite | the `sqlite3` build hook downloads a prebuilt library at build time (see [Platform setup](#platform-setup)) |
 
 Two rules to know up front:
 
 - **Declare `INTERNET` in your release manifest.** Flutter adds it only to debug builds, so a release APK without it
   logs fine but never uploads.
-- **On the web, the server must answer CORS preflights** for `POST` with `X-Api-Key` and `Content-Type`, or every
+- **On the web, the server must answer CORS preflights** for `POST` with `X-Api-Key` and `Content-Type` (plus
+  `X-SealedTrace-Attestation` when `attestationTokenProvider` is set), or every
   upload fails as a network error.
 
 <a id="quick-start"></a>
@@ -544,7 +545,8 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 ### Web
 
 - Storage is IndexedDB. No `sqlite3.wasm` or worker scripts are needed.
-- The server must allow cross-origin `POST` with the `X-Api-Key` and `Content-Type` headers.
+- The server must allow cross-origin `POST` with the `X-Api-Key` and `Content-Type` headers, and
+  `X-SealedTrace-Attestation` if you set `attestationTokenProvider`.
 - Leaving the page seals the queue into `localStorage` (ciphertext only, capped at 1 M characters) because browsers
   drop asynchronous writes made while a page is going away.
 
@@ -699,10 +701,44 @@ sequenceDiagram
 | AAD | The clear header is authenticated. AAD = UTF-8 of seven lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v3`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, `kid`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt`, `eventCount` or `kid`, fails decryption. |
 | `kid` | Identifies the project key the batch was sealed to: the first 16 bytes of SHA-256 over the key's DER `SubjectPublicKeyInfo`, base64url without padding (22 characters). Compute it on the server with `openssl pkey -pubin -in key.pem -outform der \| openssl dgst -sha256 -binary \| head -c 16 \| openssl base64 \| tr '+/' '-_' \| tr -d '='`. Keep every private key the app may still have sealed to, indexed by `kid`, so a key rotation never leaves envelopes ambiguous. |
 | Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label. The project key is 2048, 3072 or 4096 bits; `alg` names the size and `wrappedKey` is as long as the modulus (256, 384 or 512 bytes). |
-| v2 envelopes | Rows stored by a build from before `kid` are still sent as they were sealed: `"v": 2`, no `kid`, RSA-2048, and the six-line v2 AAD (`sealed_trace.envelope.v2`, then `alg` … `eventCount`). Servers must accept both versions. |
+| v1 envelopes | Rows that an earlier 1.0.0 build (envelope v1) left on the device are sent after the app upgrades exactly as they were sealed: `"v": 1`, no `kid`, RSA-2048, **no AAD** and no padding. Servers must keep accepting v1 during the transition (see below). |
 | Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout; redirects are not followed; at most 256 KB of response body is read. |
 | Response | `202` with `accepted`, `duplicate` and `rejected[{batchId, reason}]`; unknown fields are ignored. |
 | Vectors | [`test/vectors/envelope_vectors.json`](https://github.com/rsagar024/sealed_trace/blob/master/test/vectors/envelope_vectors.json): known-answer cases and complete envelopes, with a test-only key, for server implementers. |
+
+<a id="backend-changes"></a>
+
+### Server changes since the first 1.0.0 builds (envelope v1)
+
+A server that works with the earlier 1.0.0 builds needs these changes before apps ship this version.
+
+**Required**
+
+1. **Accept `"v": 3`.** Read `kid`, pick the private key by `kid`, rebuild the seven-line AAD above and decrypt with
+   it. Accept `alg` `RSA-OAEP-2048/3072/4096-SHA256+AES-256-GCM` with a 256/384/512-byte `wrappedKey`. Report an
+   unknown `kid` or a failed decryption as a per-batch `rejected` reason, not a request error.
+2. **Keep accepting `"v": 1` (no `kid`, no AAD) for a transition window only.** Devices that upgrade still upload
+   what the old build stored (up to the 7-day retention). A v1 header is not authenticated, so after the window
+   (for example, `createdAt` older than your rollout date plus the retention period and a margin) reject `"v": 1`.
+3. **Answer the ingest URL directly over HTTPS.** The SDK no longer follows redirects (301/302/307/308 from a
+   trailing slash, http→https or a load balancer) and treats them as a server error. `http` base URLs are refused
+   outside `dev`/`local`.
+4. **Accept trailing spaces after the JSON array.** The plaintext is padded with ASCII spaces (Padmé). Standard JSON
+   parsers accept trailing whitespace; otherwise trim it before parsing.
+
+**Recommended**
+
+5. Answer 401/403 with a JSON body and `Content-Type: application/json`. The SDK then waits 1 hour (doubling up
+   to 12 hours) before retrying. A non-JSON 401/403 looks like a captive portal or proxy, so it retries after 5 minutes.
+6. If apps set `attestationTokenProvider`, verify `X-SealedTrace-Attestation`, and on the web allow that header in
+   CORS (`Access-Control-Allow-Headers`).
+7. If apps set `pinnedSpkiSha256`, rotate the TLS key only to a key whose pin the apps already ship.
+
+**What the console sees differently** (no API change): `ctx.userName` is `***` and `ctx.userDisplayName` is absent
+unless the app opts in (`maskUserName: false`, `sendUserDisplayName: true`). `userId` may be a `p_…` pseudonym
+(`pseudonymizeUserId`). On the web, `ctx.os` is `Chrome 157 on Windows` rather than the full user agent. More values
+arrive as `***` (IP addresses, IBANs, Aadhaar, PAN, API keys, JWTs and others). `setContext` keeps at most 100 keys /
+16 KB.
 
 <a id="status"></a>
 
@@ -765,11 +801,13 @@ The integration test runs **offline**: it uploads to a mock ingest server plugge
 
 ## 🔄 Migration notes
 
-- **1.0.0 is the first release.** There is nothing to migrate from.
+- **1.0.0 is the first release on pub.dev.**
 - The version follows semantic versioning: the public API in `package:sealed_trace/sealed_trace.dart` is stable within
   1.x, and breaking changes will come as 2.0.0.
-- The envelope format is `v: 2` (v1 had no AAD). Servers must check `v` and decrypt with the AAD above;
-  a v1-only server rejects every v2 envelope.
+- **Upgrading from an earlier 1.0.0 build (envelope v1):** new envelopes are `v: 3` (authenticated header with
+  `kid`), so a v1-only server rejects them. Update the server first; see
+  [Server changes](#backend-changes). Rows the old build left on the device are still sent as `v: 1`, and the local
+  database migrates by itself (schema 2 adds a `kid` column).
 
 <a id="development"></a>
 

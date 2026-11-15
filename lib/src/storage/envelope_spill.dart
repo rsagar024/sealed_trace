@@ -101,7 +101,7 @@ SealedEnvelope decodeSpilledEnvelope(String text) {
   }
   final envelope = _decodeFields(m);
   _checkSpilled(envelope);
-  // The algorithm must match the wrapped key's size (and be RSA-2048 for v2).
+  // The algorithm must match the wrapped key's size (and be RSA-2048 for v1).
   if (m['alg'] != envelope.algorithm ||
       (kid == null && envelope.algorithm != envelopeAlgorithm)) {
     throw const FormatException('Unknown spilled envelope format');

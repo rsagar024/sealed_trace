@@ -98,12 +98,12 @@ void main() {
       ]);
     });
 
-    test('I3: a legacy row (no kid) is sent as v2 with no kid', () async {
+    test('I3: a 1.0.0 row (no kid) is sent as v1 with no kid', () async {
       final legacy = makeEnvelope(id: 'old', kid: null);
       final adapter = FakeHttpClientAdapter();
       await _transport(adapter).send([legacy]);
       final wire = adapter.requests.single.envelopes.single;
-      expect(wire['v'], 2);
+      expect(wire['v'], 1);
       expect(wire.containsKey('kid'), isFalse);
       expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
     });

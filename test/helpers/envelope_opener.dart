@@ -86,15 +86,20 @@ Future<Uint8List> openFields({
   );
 }
 
-/// The AAD a server rebuilds from a wire envelope's clear header fields.
-Uint8List wireAad(Map<String, dynamic> wire) => envelopeAad(
-  projectId: wire['projectId'] as String,
-  batchId: wire['batchId'] as String,
-  createdAt: wire['createdAt'] as String,
-  eventCount: wire['eventCount'] as int,
-  algorithm: wire['alg'] as String,
-  kid: wire['kid'] as String?,
-);
+/// The AAD a server rebuilds from a wire envelope's clear header fields: the
+/// v3 header, or none for a v1 envelope (no `kid`).
+Uint8List wireAad(Map<String, dynamic> wire) {
+  final kid = wire['kid'] as String?;
+  if (wire['v'] == 1 && kid == null) return Uint8List(0);
+  return envelopeAad(
+    projectId: wire['projectId'] as String,
+    batchId: wire['batchId'] as String,
+    createdAt: wire['createdAt'] as String,
+    eventCount: wire['eventCount'] as int,
+    algorithm: wire['alg'] as String,
+    kid: kid ?? '',
+  );
+}
 
 /// Decrypts a [SealedEnvelope] to its plaintext JSON array text, without the
 /// trailing padding spaces (L6). See [openEnvelopeRaw] for the padded text.

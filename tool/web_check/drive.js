@@ -300,12 +300,15 @@ function decrypt(wire) {
     Buffer.from(wire.wrappedKey, 'base64'),
   );
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wire.iv, 'base64'));
-  // The clear header is authenticated as AAD (see the vectors' spec): v3
-  // adds the kid as a seventh line; v2 (no kid) has six.
-  const lines = ['sealed_trace.envelope.v' + (wire.kid === undefined ? 2 : 3), wire.alg,
-    wire.projectId, wire.batchId, wire.createdAt, String(wire.eventCount)];
-  if (wire.kid !== undefined) lines.push(wire.kid);
-  decipher.setAAD(Buffer.from(lines.join(String.fromCharCode(10)), 'utf8'));
+  // v3: the clear header, kid included, is authenticated as AAD (see the
+  // vectors' spec). v1 (sealed_trace 1.0.0) has no AAD.
+  if (wire.v !== 1) {
+    decipher.setAAD(Buffer.from(
+      ['sealed_trace.envelope.v3', wire.alg, wire.projectId, wire.batchId,
+        wire.createdAt, String(wire.eventCount), wire.kid].join(String.fromCharCode(10)),
+      'utf8',
+    ));
+  }
   decipher.setAuthTag(Buffer.from(wire.tag, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(wire.ciphertext, 'base64')), decipher.final()]);
 }

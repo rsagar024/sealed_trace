@@ -45,7 +45,7 @@ void main() {
         'unicode_event',
         'full_batch_25_events',
         'rsa_3072_key',
-        'legacy_v2_no_kid',
+        'legacy_v1_no_aad',
       ]),
     );
   });
@@ -71,9 +71,9 @@ void main() {
       test(c['name'] as String, () async {
         final wire = (c['envelope'] as Map).cast<String, dynamic>();
 
-        final legacy = c['name'] == 'legacy_v2_no_kid';
+        final legacy = c['name'] == 'legacy_v1_no_aad';
         final rsa3072 = c['name'] == 'rsa_3072_key';
-        expect(wire['v'], legacy ? 2 : 3);
+        expect(wire['v'], legacy ? 1 : 3);
         expect(
           wire['alg'],
           rsa3072
@@ -108,7 +108,10 @@ void main() {
           c['paddedLength'],
         );
         expect(
-          padmeLength(utf8.encode(c['plaintextJson'] as String).length),
+          legacy
+              // 1.0.0 did not pad (L6 came later).
+              ? utf8.encode(c['plaintextJson'] as String).length
+              : padmeLength(utf8.encode(c['plaintextJson'] as String).length),
           c['paddedLength'],
         );
 
