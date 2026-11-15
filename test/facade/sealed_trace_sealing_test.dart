@@ -84,7 +84,7 @@ void main() {
   group('the public key is validated at init', () {
     final bad = <String, String>{
       '1024-bit key': testPublicKey1024,
-      '3072-bit key': testPublicKey3072,
+      '2560-bit key': testPublicKey2560,
       'EC key': testPublicKeyEc,
       'private key': testPrivateKeyPkcs8,
       'garbage between PEM markers':

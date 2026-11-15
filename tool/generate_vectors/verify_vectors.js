@@ -11,6 +11,21 @@ const file = path.join(__dirname, '..', '..', 'test', 'vectors', 'envelope_vecto
 const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
 const privateKey = crypto.createPrivateKey(doc.testOnlyKeys.privateKeyPkcs8);
 
+// I3: kid = first 16 bytes of SHA-256(DER SubjectPublicKeyInfo), base64url.
+// Computed here by Node/OpenSSL, independently of the Dart code.
+function kidOf(key) {
+  const spki = crypto.createPublicKey(key).export({ type: 'spki', format: 'der' });
+  return crypto.createHash('sha256').update(spki).digest().subarray(0, 16).toString('base64url');
+}
+
+// The server's key ring: private keys by kid. v2 envelopes (no kid) were
+// always sealed to the RSA-2048 key.
+const keyRing = new Map();
+for (const pem of [doc.testOnlyKeys.privateKeyPkcs8, doc.testOnlyKeys.privateKey3072Pkcs8]) {
+  const key = crypto.createPrivateKey(pem);
+  keyRing.set(kidOf(key), key);
+}
+
 let failures = 0;
 function check(name, ok, detail) {
   if (ok) {
@@ -55,11 +70,12 @@ for (const c of doc.rsaOaepWrapCases || []) {
 // The additional authenticated data, rebuilt from the clear header fields
 // exactly as a server would (see specification.aad).
 function envelopeAad(e) {
-  return Buffer.from(
-    ['sealed_trace.envelope.v2', e.alg, e.projectId, e.batchId, e.createdAt,
-      String(e.eventCount)].join('\n'),
-    'utf8',
-  );
+  const lines = e.kid === undefined
+    ? ['sealed_trace.envelope.v2', e.alg, e.projectId, e.batchId, e.createdAt,
+      String(e.eventCount)]
+    : ['sealed_trace.envelope.v3', e.alg, e.projectId, e.batchId, e.createdAt,
+      String(e.eventCount), e.kid];
+  return Buffer.from(lines.join('\n'), 'utf8');
 }
 
 function openEnvelope(e, key, aad) {
@@ -92,21 +108,30 @@ function fails(fn) {
 
 for (const c of doc.envelopes) {
   const e = c.envelope;
+  const legacy = e.v === 2;
   const wire = ['v', 'batchId', 'projectId', 'createdAt', 'eventCount', 'alg',
-    'wrappedKey', 'iv', 'tag', 'ciphertext'];
+    ...(legacy ? [] : ['kid']), 'wrappedKey', 'iv', 'tag', 'ciphertext'];
   check(`${c.name}: wire keys`, JSON.stringify(Object.keys(e)) === JSON.stringify(wire));
-  check(`${c.name}: v and alg`, e.v === 2 && e.alg === 'RSA-OAEP-2048-SHA256+AES-256-GCM');
-  check(`${c.name}: aadUtf8 matches the rebuilt AAD`, envelopeAad(e).toString('utf8') === c.aadUtf8);
 
   const iv = Buffer.from(e.iv, 'base64');
   const tag = Buffer.from(e.tag, 'base64');
   const wrapped = Buffer.from(e.wrappedKey, 'base64');
-  check(`${c.name}: sizes`, iv.length === 12 && tag.length === 16 && wrapped.length === 256);
+  const bits = wrapped.length * 8;
+  check(`${c.name}: v, alg and key size`,
+    (legacy ? bits === 2048 : e.v === 3 && [2048, 3072, 4096].includes(bits)) &&
+      e.alg === `RSA-OAEP-${bits}-SHA256+AES-256-GCM`);
+  check(`${c.name}: aadUtf8 matches the rebuilt AAD`, envelopeAad(e).toString('utf8') === c.aadUtf8);
+  check(`${c.name}: sizes`, iv.length === 12 && tag.length === 16);
+
+  // Pick the private key the way a server would: by kid, or the 2048 key for v2.
+  const ringKey = legacy ? privateKey : keyRing.get(e.kid);
+  check(`${c.name}: kid names a known key`, ringKey !== undefined, e.kid);
+  if (ringKey === undefined) continue;
 
   let key;
   try {
     key = crypto.privateDecrypt(
-      { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+      { key: ringKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
       wrapped,
     );
   } catch (err) {
@@ -136,6 +161,8 @@ for (const c of doc.envelopes) {
     ['projectId', '11111111-1111-4111-8111-111111111111'],
     ['createdAt', '2020-01-01T00:00:00.000Z'],
     ['eventCount', e.eventCount + 1],
+    // I3: kid is authenticated; adding one to a v2 envelope also fails.
+    ['kid', legacy ? 'i5AhdjEFUP1jG9OUOECv9Q' : 'AAAAAAAAAAAAAAAAAAAAAA'],
   ]) {
     const forged = { ...e, [field]: value };
     check(`${c.name}: changed ${field} fails`,

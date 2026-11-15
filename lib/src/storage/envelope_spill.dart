@@ -93,11 +93,19 @@ SealedEnvelope decodeSpilledEnvelope(String text) {
     throw const FormatException('Spilled entry too large');
   }
   final m = jsonDecode(text) as Map<String, dynamic>;
-  if (m['v'] != envelopeVersion || m['alg'] != envelopeAlgorithm) {
+  final version = m['v'];
+  final kid = m['kid'];
+  if (!((version == envelopeVersion && kid is String) ||
+      (version == legacyEnvelopeVersion && kid == null))) {
     throw const FormatException('Unknown spilled envelope format');
   }
   final envelope = _decodeFields(m);
   _checkSpilled(envelope);
+  // The algorithm must match the wrapped key's size (and be RSA-2048 for v2).
+  if (m['alg'] != envelope.algorithm ||
+      (kid == null && envelope.algorithm != envelopeAlgorithm)) {
+    throw const FormatException('Unknown spilled envelope format');
+  }
   return envelope;
 }
 
@@ -105,7 +113,8 @@ void _checkSpilled(SealedEnvelope e) {
   if (!_spillBatchId.hasMatch(e.batchId) ||
       e.projectId.isEmpty ||
       e.projectId.length > 256 ||
-      e.wrappedKey.length != 256 ||
+      !supportedRsaModulusBits.contains(e.wrappedKey.length * 8) ||
+      (e.kid != null && !_spillBatchId.hasMatch(e.kid!)) ||
       e.iv.length != 12 ||
       e.tag.length != 16 ||
       e.eventCount < 1 ||
@@ -135,6 +144,7 @@ SealedEnvelope _decodeFields(Map<String, dynamic> m) {
     maxTs: m['maxTs'] as int,
     topLevels: m['topLevels'] as String,
     payloadSize: m['payloadSize'] as int,
+    kid: m['kid'] as String?,
   );
 }
 

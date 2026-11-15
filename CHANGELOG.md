@@ -167,6 +167,14 @@ First release.
   pseudonym. On the web, `ctx.os` is now only the browser, its major version
   and the OS (`Chrome 157 on Windows`), not up to 120 characters of user
   agent.
+- **Envelope v3: key id and larger RSA keys.** Every envelope now carries
+  `kid`, the project key's identifier (first 16 bytes of SHA-256 over its DER
+  SubjectPublicKeyInfo, base64url), on the wire and as a seventh AAD line, so
+  a server can pick the right private key after a key rotation. RSA keys of
+  3072 and 4096 bits are accepted; `alg` names the size. Rows stored by an
+  earlier build are still sent as v2 exactly as they were sealed. The SQLite
+  schema moves to version 2 (a nullable `kid` column). **The server must
+  accept v3 and v2.**
 - **The test key cannot ship.** Release builds (`kReleaseMode`) refuse the
   repository's test RSA key, whose private key is public: `init` reports it
   through `onException` and leaves the SDK disabled. `test/` and `tool/`,

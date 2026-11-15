@@ -7,6 +7,7 @@ import '../event/log_record.dart';
 import '../model/sealed_envelope.dart';
 import '../platform/clock.dart';
 import 'crypto_backend.dart';
+import 'key_id.dart';
 import 'public_key_parser.dart';
 
 /// Seals a batch of events into an encrypted [SealedEnvelope].
@@ -31,6 +32,9 @@ class EnvelopeSealer {
     this.clock = const SystemClock(),
     String Function()? newId,
   }) : backend = backend ?? DefaultCryptoBackend(),
+       kid = keyId(publicKey),
+       algorithm = envelopeAlgorithmFor(publicKey.modulus.bitLength),
+       _wrappedKeyLength = (publicKey.modulus.bitLength + 7) >> 3,
        _newId = newId ?? const Uuid().v4;
 
   /// The project's RSA public key.
@@ -38,6 +42,14 @@ class EnvelopeSealer {
 
   /// Sent inside every envelope.
   final String projectId;
+
+  /// The key identifier sent in every envelope (I3), from [publicKey].
+  final String kid;
+
+  /// The `alg` sent in every envelope, from the size of [publicKey].
+  final String algorithm;
+
+  final int _wrappedKeyLength;
 
   /// The crypto primitives.
   final CryptoBackend backend;
@@ -50,7 +62,6 @@ class EnvelopeSealer {
   static const int _keyLength = 32;
   static const int _ivLength = 12;
   static const int _tagLength = 16;
-  static const int _wrappedKeyLength = 256;
 
   /// Encrypts [records] into an envelope.
   Future<SealedEnvelope> seal(List<LogRecord> records) async {
@@ -128,6 +139,8 @@ class EnvelopeSealer {
         batchId: batchId,
         createdAt: envelopeCreatedAt(created),
         eventCount: records.length,
+        algorithm: algorithm,
+        kid: kid,
       ),
     );
   }
@@ -168,6 +181,7 @@ class EnvelopeSealer {
       maxTs: 0,
       topLevels: '',
       payloadSize: plaintext.length,
+      kid: kid,
     );
   }
 }

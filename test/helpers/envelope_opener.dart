@@ -26,9 +26,13 @@ import 'test_keys.dart';
   );
 }
 
-/// Unwraps an RSA-OAEP (SHA-256) wrapped key with the test private key.
+/// Unwraps an RSA-OAEP (SHA-256) wrapped key with the test private key of
+/// the matching size: the 3072-bit test key for a 384-byte wrapped key, the
+/// 2048-bit one otherwise.
 Uint8List unwrapKey(Uint8List wrapped) {
-  final key = loadTestPrivateKey();
+  final key = loadTestPrivateKey(
+    wrapped.length == 384 ? testPrivateKey3072Pkcs8 : testPrivateKeyPkcs8,
+  );
   return oaepDecrypt(
     modulus: key.modulus,
     privateExponent: key.privateExponent,
@@ -89,6 +93,7 @@ Uint8List wireAad(Map<String, dynamic> wire) => envelopeAad(
   createdAt: wire['createdAt'] as String,
   eventCount: wire['eventCount'] as int,
   algorithm: wire['alg'] as String,
+  kid: wire['kid'] as String?,
 );
 
 /// Decrypts a [SealedEnvelope] to its plaintext JSON array text, without the

@@ -1,53 +1,84 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// The only envelope version this SDK produces.
+/// The envelope version this SDK produces.
 ///
-/// Version 2 authenticates the clear header fields as AES-GCM additional
-/// authenticated data (see [envelopeAad]). Version 1 had no AAD.
-const int envelopeVersion = 2;
+/// Version 3 (I3) adds `kid`, the project key's identifier (see
+/// `keyId`), to the wire JSON and to the AAD, and allows RSA keys of 2048,
+/// 3072 and 4096 bits. Version 2 authenticated the clear header without a
+/// `kid`; envelopes stored by a v2 build are still sent as v2
+/// ([legacyEnvelopeVersion]). Version 1 had no AAD.
+const int envelopeVersion = 3;
 
-/// The fixed algorithm identifier carried by every envelope.
+/// The version of envelopes sealed before `kid` existed (no `kid`, RSA-2048).
+const int legacyEnvelopeVersion = 2;
+
+/// RSA modulus sizes accepted for the project key, in bits.
+const Set<int> supportedRsaModulusBits = <int>{2048, 3072, 4096};
+
+/// The algorithm identifier for an RSA key of [modulusBits] bits.
+String envelopeAlgorithmFor(int modulusBits) =>
+    'RSA-OAEP-$modulusBits-SHA256+AES-256-GCM';
+
+/// The algorithm identifier for RSA-2048, the only one before v3.
 const String envelopeAlgorithm = 'RSA-OAEP-2048-SHA256+AES-256-GCM';
 
-/// First line of the additional authenticated data, for domain separation.
-const String envelopeAadTag = 'sealed_trace.envelope.v2';
+/// First line of the v3 additional authenticated data, for domain
+/// separation.
+const String envelopeAadTag = 'sealed_trace.envelope.v3';
+
+/// First line of the v2 additional authenticated data.
+const String legacyEnvelopeAadTag = 'sealed_trace.envelope.v2';
+
+final RegExp _kidPattern = RegExp(r'^[A-Za-z0-9_\-]{1,64}$');
 
 /// The AES-GCM additional authenticated data for an envelope's header.
 ///
-/// UTF-8 bytes of six lines joined by a single LF (`0x0A`, no trailing LF):
-/// [envelopeAadTag], `alg`, `projectId`, `batchId`, `createdAt` and
-/// `eventCount`, each exactly as it appears in the wire JSON (`createdAt` as
-/// the ISO-8601 string, `eventCount` in decimal). A server rebuilds it from
-/// the received fields, so changing any of them makes decryption fail.
+/// UTF-8 bytes of lines joined by a single LF (`0x0A`, no trailing LF), each
+/// exactly as it appears in the wire JSON (`createdAt` as the ISO-8601
+/// string, `eventCount` in decimal):
+///
+/// - **v3** (with [kid]): [envelopeAadTag], `alg`, `projectId`, `batchId`,
+///   `createdAt`, `eventCount`, `kid`.
+/// - **v2** ([kid] null): [legacyEnvelopeAadTag], `alg`, `projectId`,
+///   `batchId`, `createdAt`, `eventCount`.
+///
+/// A server rebuilds it from the received fields, so changing any of them
+/// makes decryption fail.
 ///
 /// Throws [ArgumentError] if a field contains a line break, which would make
-/// the encoding ambiguous.
+/// the encoding ambiguous, or if [kid] is not 1–64 base64url characters.
 Uint8List envelopeAad({
   required String projectId,
   required String batchId,
   required String createdAt,
   required int eventCount,
   String algorithm = envelopeAlgorithm,
+  String? kid,
 }) {
   for (final (name, value) in [
     ('projectId', projectId),
     ('batchId', batchId),
     ('createdAt', createdAt),
+    ('algorithm', algorithm),
   ]) {
     if (value.contains('\n') || value.contains('\r')) {
       throw ArgumentError.value(value, name, 'must not contain a line break');
     }
   }
+  if (kid != null && !_kidPattern.hasMatch(kid)) {
+    throw ArgumentError.value(kid, 'kid', 'must be 1-64 base64url characters');
+  }
   return Uint8List.fromList(
     utf8.encode(
       [
-        envelopeAadTag,
+        kid == null ? legacyEnvelopeAadTag : envelopeAadTag,
         algorithm,
         projectId,
         batchId,
         createdAt,
         '$eventCount',
+        ?kid,
       ].join('\n'),
     ),
   );
@@ -81,6 +112,7 @@ class SealedEnvelope {
     required this.maxTs,
     required this.topLevels,
     required this.payloadSize,
+    this.kid,
   });
 
   /// uuid-v4 identifying the batch; the server deduplicates on it.
@@ -95,7 +127,8 @@ class SealedEnvelope {
   /// Number of events inside.
   final int eventCount;
 
-  /// The AES key wrapped with the project's RSA public key (256 bytes).
+  /// The AES key wrapped with the project's RSA public key: as long as its
+  /// modulus (256, 384 or 512 bytes).
   final Uint8List wrappedKey;
 
   /// The 12-byte AES-GCM nonce.
@@ -129,22 +162,36 @@ class SealedEnvelope {
   int get storedBytes =>
       wrappedKey.length + iv.length + tag.length + ciphertext.length;
 
+  /// The identifier of the project key this envelope was sealed to, or null
+  /// for an envelope stored by a v2 build (I3).
+  final String? kid;
+
+  /// The wire format version: [envelopeVersion] with a [kid],
+  /// [legacyEnvelopeVersion] without.
+  int get version => kid == null ? legacyEnvelopeVersion : envelopeVersion;
+
+  /// The algorithm identifier, from the wrapped key's size.
+  String get algorithm => envelopeAlgorithmFor(wrappedKey.length * 8);
+
   /// The additional authenticated data this envelope was sealed with.
   Uint8List get aad => envelopeAad(
     projectId: projectId,
     batchId: batchId,
     createdAt: envelopeCreatedAt(createdAt),
     eventCount: eventCount,
+    algorithm: algorithm,
+    kid: kid,
   );
 
   /// The wire form defined by the envelope format (section 7).
   Map<String, dynamic> toWireJson() => <String, dynamic>{
-    'v': envelopeVersion,
+    'v': version,
     'batchId': batchId,
     'projectId': projectId,
     'createdAt': envelopeCreatedAt(createdAt),
     'eventCount': eventCount,
-    'alg': envelopeAlgorithm,
+    'alg': algorithm,
+    'kid': ?kid,
     'wrappedKey': base64Encode(wrappedKey),
     'iv': base64Encode(iv),
     'tag': base64Encode(tag),

@@ -394,12 +394,14 @@ void main() {
       'createdAt',
       'eventCount',
       'alg',
+      'kid',
       'wrappedKey',
       'iv',
       'tag',
       'ciphertext',
     });
-    expect(e['v'], 2);
+    expect(e['v'], 3);
+    expect(e['kid'], testKeyId);
     expect(e['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
     expect(e['projectId'], 'proj-c');
     expect(e['eventCount'], 2);

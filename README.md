@@ -15,7 +15,7 @@ await SealedTrace.init(const SealedTraceConfig(
   baseUrl: 'https://logs.example.com',
   projectId: 'my-project',
   apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
-  publicKeyPem: projectPublicKeyPem,   // RSA-2048, from the SealedTrace console
+  publicKeyPem: projectPublicKeyPem,   // RSA-2048/3072/4096, from the SealedTrace console
   appName: 'shop',
 ));
 
@@ -68,7 +68,7 @@ Nothing else needs importing.
   looks like an email, card number, phone number or coordinates become `***` *before* the event is queued. You can add
   your own keys and patterns.
 - 🔒 **Hybrid encryption per batch:** up to 25 events (or 64 KB) are encrypted with AES-256-GCM using a fresh key,
-  wrapped with your project's RSA-2048 public key (RSA-OAEP, SHA-256).
+  wrapped with your project's RSA public key (2048, 3072 or 4096 bits; RSA-OAEP, SHA-256).
 - 💾 **Offline, ciphertext only:**
   - storage is SQLite (drift) on Android, iOS and desktop, and IndexedDB in the browser;
   - only the sealed envelope plus a few index columns (creation time, event count, padded size) are stored;
@@ -236,7 +236,7 @@ Two rules to know up front:
 | `baseUrl` | required | Absolute URL of the SealedTrace server. Trailing slashes are ignored. Must be `https` unless `env` is `dev` or `local` or `allowInsecureHttp` is `true`; otherwise the SDK stays disabled and reports the problem. |
 | `projectId` | required | Project the envelopes belong to. |
 | `apiKey` | required | Sent only as the `X-Api-Key` header. A **publishable** identifier: anything compiled into an app can be extracted, so it is not a secret. See [Sender authenticity](#sender-authenticity). |
-| `publicKeyPem` | required | The project's RSA-2048 public key, SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
+| `publicKeyPem` | required | The project's RSA public key (2048, 3072 or 4096 bits), SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
 | `appName` | required | Your app's name. |
 | `env` | `SealedTraceEnv.prod` | `SealedTraceEnv.dev`, `.staging`, `.prod`, or any environment created on the dashboard, such as `SealedTraceEnv('qa')`. 1–32 chars of `a-z`, `0-9`, `_`, `-`; any other name leaves the SDK disabled. Reported in every event as `ctx.env`. See [Environments & flavors](#environments). |
 | `minLevel` | `LogLevel.verbose` | Events below this level are dropped before anything is built. |
@@ -428,7 +428,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `baseUrl` | your SealedTrace server | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
 | `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
 | `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. **Publishable, not secret:** `--dart-define` and obfuscation do not stop extraction. |
-| `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. Release builds refuse the repository's test key (its private key is public). |
+| `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, 3072 or 4096, SPKI or PKCS#1 PEM. Each envelope names its key by `kid`, so you can rotate keys: keep the old private key on the server until devices have uploaded what they sealed with it. The **private** key stays on the server; never put it in an app. Release builds refuse the repository's test key (its private key is public). |
 
 - Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
@@ -556,7 +556,7 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 
 1. Masking runs on the caller's side before an event is queued, over the message, error, stack trace, metadata and
    your own context values.
-2. Every batch is encrypted with a fresh AES-256-GCM key, wrapped with the project's RSA-2048 public key.
+2. Every batch is encrypted with a fresh AES-256-GCM key, wrapped with the project's RSA public key, and names that key by `kid`.
 3. Only ciphertext and index columns (creation time, event count, padded size) are stored or sent. The plaintext is
    padded to a size bucket, so the ciphertext length reveals only an approximate size; sequence numbers, event times
    and levels (for example whether a `fatal` happened) stay inside the ciphertext.
@@ -606,7 +606,7 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   but the pure-Dart AES uses lookup tables (cache timing) and Dart gives no constant-time guarantee. On the web every
   asynchronous seal uses the browser's native WebCrypto; on native platforms, pass `aesGcmEncryptor` to use platform
   crypto instead. RSA-OAEP uses `BigInt.modPow` on public values (the exponent and modulus). The hand-written parts
-  (AES-256, GCM, RSA-OAEP with SHA-256/MGF1, the DER key parser) are checked on every push by CI against independent
+  (AES-256, GCM, RSA-OAEP with SHA-256/MGF1, the DER key parser) are checked in CI against independent
   implementations: Node/OpenSSL decrypts the committed envelope vectors, and the AES-GCM and RSA-OAEP vectors come from
   Node. Nothing here replaces an audit.
 
@@ -678,13 +678,14 @@ sequenceDiagram
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "batchId": "uuid-v4",
   "projectId": "my-project",
   "createdAt": "2026-01-01T10:00:00.000Z",
   "eventCount": 25,
   "alg": "RSA-OAEP-2048-SHA256+AES-256-GCM",
-  "wrappedKey": "<base64, 256 bytes>",
+  "kid": "i5AhdjEFUP1jG9OUOECv9Q",
+  "wrappedKey": "<base64, 256 / 384 / 512 bytes>",
   "iv": "<base64, 12 bytes>",
   "tag": "<base64, 16 bytes>",
   "ciphertext": "<base64>"
@@ -695,8 +696,10 @@ sequenceDiagram
 |---|---|
 | Plaintext | Compact JSON array of events, UTF-8, followed by ASCII spaces up to its Padmé length (at least 256 bytes, at most about 12 % more). Trailing whitespace is valid JSON; parse it as is or strip the spaces. The vectors file gives the formula and each case's `paddedLength`. |
 | AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, 16-byte tag stored separately. |
-| AAD | The clear header is authenticated. AAD = UTF-8 of six lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v2`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt` or `eventCount`, fails decryption. |
-| Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label; `wrappedKey` is 256 bytes. |
+| AAD | The clear header is authenticated. AAD = UTF-8 of seven lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v3`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, `kid`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt`, `eventCount` or `kid`, fails decryption. |
+| `kid` | Identifies the project key the batch was sealed to: the first 16 bytes of SHA-256 over the key's DER `SubjectPublicKeyInfo`, base64url without padding (22 characters). Compute it on the server with `openssl pkey -pubin -in key.pem -outform der \| openssl dgst -sha256 -binary \| head -c 16 \| openssl base64 \| tr '+/' '-_' \| tr -d '='`. Keep every private key the app may still have sealed to, indexed by `kid`, so a key rotation never leaves envelopes ambiguous. |
+| Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label. The project key is 2048, 3072 or 4096 bits; `alg` names the size and `wrappedKey` is as long as the modulus (256, 384 or 512 bytes). |
+| v2 envelopes | Rows stored by a build from before `kid` are still sent as they were sealed: `"v": 2`, no `kid`, RSA-2048, and the six-line v2 AAD (`sealed_trace.envelope.v2`, then `alg` … `eventCount`). Servers must accept both versions. |
 | Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout; redirects are not followed; at most 256 KB of response body is read. |
 | Response | `202` with `accepted`, `duplicate` and `rejected[{batchId, reason}]`; unknown fields are ignored. |
 | Vectors | [`test/vectors/envelope_vectors.json`](https://github.com/rsagar024/sealed_trace/blob/master/test/vectors/envelope_vectors.json): known-answer cases and complete envelopes, with a test-only key, for server implementers. |

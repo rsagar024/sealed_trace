@@ -99,12 +99,14 @@ void main() {
       'createdAt',
       'eventCount',
       'alg',
+      'kid',
       'wrappedKey',
       'iv',
       'tag',
       'ciphertext',
     ]);
-    expect(wire['v'], 2);
+    expect(wire['v'], 3);
+    expect(wire['kid'], testKeyId);
     expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
     expect(wire['createdAt'], '2026-01-01T10:00:05.000Z');
     expect(base64.decode(wire['iv'] as String), hasLength(12));
@@ -221,7 +223,7 @@ void main() {
     test('the untouched wire envelope opens', () async {
       final e = await _sealer().seal([_record(seq: 1), _record(seq: 2)]);
       final wire = e.toWireJson();
-      expect(wire['v'], 2);
+      expect(wire['v'], 3);
       expect(await openWire(wire), startsWith('['));
     });
 
@@ -244,6 +246,12 @@ void main() {
       await expectWireFails(tampered(wire, 'alg', 'RSA-OAEP-4096+AES-GCM'));
     });
 
+    test('I3: changing or dropping kid fails', () async {
+      final wire = (await _sealer().seal([_record(seq: 1)])).toWireJson();
+      await expectWireFails(tampered(wire, 'kid', 'AAAAAAAAAAAAAAAAAAAAAA'));
+      await expectWireFails(<String, dynamic>{...wire}..remove('kid'));
+    });
+
     test('decrypting without AAD (the v1 way) fails', () async {
       final e = await _sealer().seal([_record(seq: 1)]);
       await expectLater(
@@ -264,7 +272,44 @@ void main() {
       await expectWireFails(tampered(e.toWireJson(), 'eventCount', 2));
     });
 
-    test('the AAD encoding is the documented six lines', () {
+    test('I3: the v3 AAD encoding is the documented seven lines', () {
+      final aad = envelopeAad(
+        projectId: 'p-1',
+        batchId: 'b-1',
+        createdAt: '2026-01-01T10:00:05.000Z',
+        eventCount: 3,
+        algorithm: 'RSA-OAEP-3072-SHA256+AES-256-GCM',
+        kid: 'k_-1',
+      );
+      expect(
+        utf8.decode(aad),
+        'sealed_trace.envelope.v3\n'
+        'RSA-OAEP-3072-SHA256+AES-256-GCM\n'
+        'p-1\n'
+        'b-1\n'
+        '2026-01-01T10:00:05.000Z\n'
+        '3\n'
+        'k_-1',
+      );
+    });
+
+    test('I3: a kid that is not base64url is refused', () {
+      for (final kid in ['', 'a b', 'a\nb', 'x' * 65, 'a+b/c=']) {
+        expect(
+          () => envelopeAad(
+            projectId: 'p',
+            batchId: 'b',
+            createdAt: 'c',
+            eventCount: 1,
+            kid: kid,
+          ),
+          throwsArgumentError,
+          reason: kid,
+        );
+      }
+    });
+
+    test('the v2 AAD encoding (no kid) is the documented six lines', () {
       final aad = envelopeAad(
         projectId: 'p-1',
         batchId: 'b-1',

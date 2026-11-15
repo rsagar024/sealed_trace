@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'key_id.dart';
 import 'public_key_parser.dart';
 
 /// SHA-256 of the big-endian modulus of the sealed_trace test key.
@@ -20,17 +21,7 @@ bool isKnownTestKey(RsaPublicKeyData key) =>
     sha256.convert(modulusBytes(key)).toString() == _testKeyModulusSha256;
 
 /// The modulus of [key] as unsigned big-endian bytes, `ceil(bits / 8)` long.
-Uint8List modulusBytes(RsaPublicKeyData key) {
-  final length = (key.modulus.bitLength + 7) >> 3;
-  final out = Uint8List(length);
-  var n = key.modulus;
-  final mask = BigInt.from(0xff);
-  for (var i = length - 1; i >= 0; i--) {
-    out[i] = (n & mask).toInt();
-    n >>= 8;
-  }
-  return out;
-}
+Uint8List modulusBytes(RsaPublicKeyData key) => unsignedBytes(key.modulus);
 
 /// The problem with using [key] for sealing, or null when there is none.
 ///

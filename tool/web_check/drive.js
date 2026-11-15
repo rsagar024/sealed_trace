@@ -289,18 +289,23 @@ function stripPadding(buffer) {
   return buffer.subarray(0, end);
 }
 
+// I3: the kid the page must send, computed by Node from the test key.
+const expectedKid = crypto.createHash('sha256')
+  .update(crypto.createPublicKey(privateKey).export({ type: 'spki', format: 'der' }))
+  .digest().subarray(0, 16).toString('base64url');
+
 function decrypt(wire) {
   const key = crypto.privateDecrypt(
     { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
     Buffer.from(wire.wrappedKey, 'base64'),
   );
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wire.iv, 'base64'));
-  // v2: the clear header is authenticated as AAD (see the vectors' spec).
-  decipher.setAAD(Buffer.from(
-    ['sealed_trace.envelope.v2', wire.alg, wire.projectId, wire.batchId, wire.createdAt,
-      String(wire.eventCount)].join(String.fromCharCode(10)),
-    'utf8',
-  ));
+  // The clear header is authenticated as AAD (see the vectors' spec): v3
+  // adds the kid as a seventh line; v2 (no kid) has six.
+  const lines = ['sealed_trace.envelope.v' + (wire.kid === undefined ? 2 : 3), wire.alg,
+    wire.projectId, wire.batchId, wire.createdAt, String(wire.eventCount)];
+  if (wire.kid !== undefined) lines.push(wire.kid);
+  decipher.setAAD(Buffer.from(lines.join(String.fromCharCode(10)), 'utf8'));
   decipher.setAuthTag(Buffer.from(wire.tag, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(wire.ciphertext, 'base64')), decipher.final()]);
 }
@@ -344,7 +349,8 @@ function checkMain(lines) {
       ok =
         // L6: strip the trailing padding spaces before comparing.
         crypto.createHash('sha256').update(stripPadding(plain)).digest('base64') === e.plainHash &&
-        e.wire.v === 2 &&
+        e.wire.v === 3 &&
+        e.wire.kid === expectedKid &&
         e.wire.alg === 'RSA-OAEP-2048-SHA256+AES-256-GCM';
     } catch (err) {
       console.log(`  decrypt error: ${err.message}`);

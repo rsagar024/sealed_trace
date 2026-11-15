@@ -92,18 +92,79 @@ Future<Map<String, dynamic>> _envelopeCase(
   String name,
   String description,
   List<LogRecord> records,
-  int seed,
-) async {
+  int seed, {
+  String publicKeyPem = testPublicKeySpki,
+}) async {
   final key = _bytes(32, seed, 7);
   final iv = _bytes(12, seed + 1, 13);
   final sealer = EnvelopeSealer(
-    publicKey: PublicKeyParser.parse(testPublicKeySpki),
+    publicKey: PublicKeyParser.parse(publicKeyPem),
     projectId: _projectId,
     backend: _FixedBackend(key, iv),
     clock: _FixedClock(DateTime.utc(2026, 1, 1, 10, 0, 5)),
     newId: () => '7c9e6679-7425-40de-944b-e07fc1f90ae${seed % 10}',
   );
   final envelope = await sealer.seal(records);
+  return _caseJson(name, description, records, key, envelope);
+}
+
+/// A v2 envelope exactly as a pre-I3 build sealed it (no kid, v2 AAD), which
+/// the SDK still sends for rows stored before the upgrade.
+Future<Map<String, dynamic>> _legacyV2Case(
+  String name,
+  String description,
+  List<LogRecord> records,
+  int seed,
+) async {
+  final key = _bytes(32, seed, 7);
+  final iv = _bytes(12, seed + 1, 13);
+  final json = utf8.encode(jsonEncode([for (final r in records) r.toJson()]));
+  final padded = Uint8List(padmeLength(json.length))
+    ..fillRange(0, padmeLength(json.length), 0x20)
+    ..setRange(0, json.length, json);
+  final createdAt = DateTime.utc(2026, 1, 1, 10, 0, 5);
+  final batchId = '7c9e6679-7425-40de-944b-e07fc1f90ae${seed % 10}';
+  final backend = DefaultCryptoBackend();
+  final sealed = backend.aesGcmEncryptSync(
+    key: key,
+    iv: iv,
+    plaintext: padded,
+    aad: envelopeAad(
+      projectId: _projectId,
+      batchId: batchId,
+      createdAt: envelopeCreatedAt(createdAt),
+      eventCount: records.length,
+    ),
+  );
+  final envelope = SealedEnvelope(
+    batchId: batchId,
+    projectId: _projectId,
+    createdAt: createdAt,
+    eventCount: records.length,
+    wrappedKey: backend.rsaOaepWrap(
+      PublicKeyParser.parse(testPublicKeySpki),
+      key,
+    ),
+    iv: iv,
+    tag: sealed.tag,
+    ciphertext: sealed.ciphertext,
+    seqMin: 0,
+    seqMax: 0,
+    minTs: 0,
+    maxTs: 0,
+    topLevels: '',
+    payloadSize: padded.length,
+  );
+  return _caseJson(name, description, records, key, envelope);
+}
+
+Map<String, dynamic> _caseJson(
+  String name,
+  String description,
+  List<LogRecord> records,
+  Uint8List key,
+  SealedEnvelope envelope,
+) {
   return <String, dynamic>{
     'name': name,
     'description': description,
@@ -255,6 +316,38 @@ Future<void> main() async {
       ],
       4,
     ),
+    await _envelopeCase(
+      'rsa_3072_key',
+      'I3: a project key of 3072 bits; wrappedKey is 384 bytes and alg names '
+          'the size. Unwrap with testOnlyKeys.privateKey3072Pkcs8.',
+      [
+        _record(
+          seq: 9,
+          level: LogLevel.warning,
+          tag: 'keys',
+          message: 'sealed to a 3072-bit key',
+          at: base,
+        ),
+      ],
+      6,
+      publicKeyPem: testPublicKey3072,
+    ),
+    await _legacyV2Case(
+      'legacy_v2_no_kid',
+      'I3: an envelope stored by a v2 build before the upgrade. It has no kid, '
+          'v is 2 and the AAD is the six-line v2 form. Servers must still '
+          'accept it.',
+      [
+        _record(
+          seq: 3,
+          level: LogLevel.info,
+          tag: 'legacy',
+          message: 'sealed before the upgrade',
+          at: base,
+        ),
+      ],
+      7,
+    ),
   ];
 
   // Keys wrapped by the SDK's own RSA-OAEP, for an independent implementation
@@ -319,18 +412,30 @@ Future<void> main() async {
           'stored separately from the ciphertext. Envelopes authenticate the '
           'additional data described under "aad"; aesGcmCases use none.',
       'aad':
-          'UTF-8 bytes of six lines joined by a single LF (0x0A), no trailing '
-          'LF: "sealed_trace.envelope.v2", then alg, projectId, batchId, '
-          'createdAt and eventCount exactly as they appear in the wire JSON '
-          '(eventCount in decimal). Rebuild it from the received fields; any '
-          'change to them makes the tag check fail. v1 envelopes had no AAD.',
+          'UTF-8 bytes of lines joined by a single LF (0x0A), no trailing LF. '
+          'v3: "sealed_trace.envelope.v3", then alg, projectId, batchId, '
+          'createdAt, eventCount and kid. v2 (no kid): '
+          '"sealed_trace.envelope.v2", then alg, projectId, batchId, '
+          'createdAt and eventCount. Every value exactly as it appears in the '
+          'wire JSON (eventCount in decimal). Rebuild it from the received '
+          'fields; any change to them makes the tag check fail. v1 envelopes '
+          'had no AAD.',
+      'kid':
+          'v3 only. The first 16 bytes of SHA-256 over the DER '
+          'SubjectPublicKeyInfo of the project public key, base64url without '
+          'padding (22 characters). The server picks the private key by kid; '
+          'a v2 envelope has no kid and was sealed to the RSA-2048 key in use '
+          'at the time.',
       'rsa':
-          'RSA-OAEP over the 32-byte AES key: 2048-bit key, SHA-256 label hash, '
-          'MGF1 with SHA-256, empty label. wrappedKey is 256 bytes.',
+          'RSA-OAEP over the 32-byte AES key: SHA-256 label hash, MGF1 with '
+          'SHA-256, empty label. The key is 2048, 3072 or 4096 bits; '
+          'wrappedKey is as long as the modulus (256, 384 or 512 bytes).',
       'base64': 'Standard alphabet with padding (RFC 4648 section 4).',
       'createdAt':
           'UTC ISO-8601 with milliseconds, e.g. 2026-01-01T10:00:05.000Z.',
-      'alg': 'RSA-OAEP-2048-SHA256+AES-256-GCM',
+      'alg':
+          'RSA-OAEP-<bits>-SHA256+AES-256-GCM with <bits> 2048, 3072 or '
+          '4096; always 2048 for v2.',
     },
     'verification': <String, dynamic>{
       'openssl': <String>[
@@ -347,6 +452,8 @@ Future<void> main() async {
       'publicKeySpki': testPublicKeySpki,
       'publicKeyPkcs1': testPublicKeyPkcs1,
       'privateKeyPkcs8': testPrivateKeyPkcs8,
+      'publicKey3072Spki': testPublicKey3072,
+      'privateKey3072Pkcs8': testPrivateKey3072Pkcs8,
     },
     'projectId': _projectId,
     'envelopeVersion': envelopeVersion,
