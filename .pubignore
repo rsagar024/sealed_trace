@@ -22,6 +22,11 @@ SEALEDTRACE_PLATFORM_SPEC.md
 
 # Repo-only files (GitHub social preview and so on).
 .github/
+# Tests and dev tools (I2): they hold the test RSA private key
+# (test/helpers/test_keys.dart, test/vectors/, tool/generate_vectors/) and a
+# TLS test key, which must not ship in the published package.
+test/
+tool/
 # Source art for the example app icons (generated icons are kept).
 example/assets/
 

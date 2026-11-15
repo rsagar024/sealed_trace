@@ -91,3 +91,18 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8daJJ/rwPKkOmI6jo6zmXvcnoOoy
 50EIe5Xqh1DUtxADrcravyP9eqACDk60dwKXAPZ6w4Do/lVgjtxXuEVvVQ==
 -----END PUBLIC KEY-----
 ''';
+
+/// Another RSA-2048 public key, not the test key above. Its private key was
+/// discarded when it was generated. Used where a "real project key" is
+/// needed, such as the release-mode test-key guard (I2).
+const String otherPublicKeySpki = '''
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzajUY1Y6eEreioLH3+sj
+K7wZEJLl7KXYqyaZt8MPea2AXdGzItNG25vafZcN05Y/vW26eVBOIXryPeMsZoCx
+NlS0vNWKriDRCBH2MF/v1TNSoosf7IYy6Ppd04PsoknBZuD6eedgqnNHEx5B9kua
+klXcYDqNytKrbzM706U95Y7+JVMtDCyKvUSkKJ17r3ihCKfHDsIHMcnXLsu7eO/N
+TtEGl8qSe2YneUPBCkWv4sFQlTx6tFUuwwo/YnuOmzNUMgmh+TwLTmVF5eGtXHh0
+pgO99lmYpTh2cSZ1lmeGq9IMG/YepRggDdwqc3HTd5Zl9Q+c1oG1Le3+jfDUeu1q
+hQIDAQAB
+-----END PUBLIC KEY-----
+''';

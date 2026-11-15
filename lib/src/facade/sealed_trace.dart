@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kReleaseMode;
 import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +10,7 @@ import '../crypto/aes_gcm_platform.dart';
 import '../crypto/app_aes_gcm.dart';
 import '../crypto/crypto_backend.dart';
 import '../crypto/envelope_sealer.dart';
+import '../crypto/known_test_keys.dart';
 import '../crypto/public_key_parser.dart';
 import '../diagnostics/diagnostic_counters.dart';
 import '../event/context_limits.dart';
@@ -376,6 +377,18 @@ abstract final class SealedTrace {
           return;
         }
         final overrides = debugOverrides;
+        // I2: never seal to the repository's test key in a release build.
+        final testKey = testKeyProblem(
+          publicKey,
+          releaseMode: overrides?.releaseMode ?? kReleaseMode,
+        );
+        if (testKey != null) {
+          _report(
+            StateError('Invalid publicKeyPem: $testKey'),
+            StackTrace.current,
+          );
+          return;
+        }
         final counters = _counters;
         final adapter =
             overrides?.storage ??

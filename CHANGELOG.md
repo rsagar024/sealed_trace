@@ -167,6 +167,11 @@ First release.
   pseudonym. On the web, `ctx.os` is now only the browser, its major version
   and the OS (`Chrome 157 on Windows`), not up to 120 characters of user
   agent.
+- **The test key cannot ship.** Release builds (`kReleaseMode`) refuse the
+  repository's test RSA key, whose private key is public: `init` reports it
+  through `onException` and leaves the SDK disabled. `test/` and `tool/`,
+  which hold that private key and a TLS test key, are no longer part of the
+  published package.
 - **Custom mask patterns can no longer freeze the app.** `extraPatterns` and
   `addMaskPattern` now refuse patterns that can backtrack exponentially:
   nested repetition (`(a+)+`), repeated alternation (`(a|b)*`) and

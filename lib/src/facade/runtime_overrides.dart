@@ -37,6 +37,7 @@ class RuntimeOverrides {
     this.disableUploads = false,
     this.random,
     this.envelopeSpill,
+    this.releaseMode,
   });
 
   /// Time source.
@@ -94,4 +95,9 @@ class RuntimeOverrides {
   /// The page-exit spill. Defaults to `localStorage` on the web and to none
   /// elsewhere.
   final EnvelopeSpill? envelopeSpill;
+
+  /// Treats the build as a release build (true) or not (false) for checks
+  /// that only apply in release, such as refusing the test key. Null uses
+  /// `kReleaseMode`.
+  final bool? releaseMode;
 }

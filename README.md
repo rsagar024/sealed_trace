@@ -428,7 +428,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `baseUrl` | your SealedTrace server | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
 | `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
 | `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. **Publishable, not secret:** `--dart-define` and obfuscation do not stop extraction. |
-| `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. |
+| `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. Release builds refuse the repository's test key (its private key is public). |
 
 - Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
