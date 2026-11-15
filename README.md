@@ -605,7 +605,10 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
   public-key operation runs on the device, which limits the exposure but does not remove it. GHASH is branch-free,
   but the pure-Dart AES uses lookup tables (cache timing) and Dart gives no constant-time guarantee. On the web every
   asynchronous seal uses the browser's native WebCrypto; on native platforms, pass `aesGcmEncryptor` to use platform
-  crypto instead. RSA-OAEP uses `BigInt.modPow` on public values (the exponent and modulus).
+  crypto instead. RSA-OAEP uses `BigInt.modPow` on public values (the exponent and modulus). The hand-written parts
+  (AES-256, GCM, RSA-OAEP with SHA-256/MGF1, the DER key parser) are checked on every push by CI against independent
+  implementations: Node/OpenSSL decrypts the committed envelope vectors, and the AES-GCM and RSA-OAEP vectors come from
+  Node. Nothing here replaces an audit.
 
 <a id="architecture"></a>
 

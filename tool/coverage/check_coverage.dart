@@ -34,6 +34,12 @@ const excluded = {
   'lib/src/storage/indexeddb_storage_adapter.dart': 'browser only',
   'lib/src/storage/open_storage_web.dart': 'browser only',
   'lib/src/storage/envelope_spill_web.dart': 'browser only',
+  'lib/src/crypto/aes_gcm_platform_web.dart':
+      'browser only (WebCrypto; checked by tool/web_check)',
+  'lib/src/crypto/aes_gcm_platform_stub.dart':
+      'platforms with neither io nor web',
+  'lib/src/transport/pinned_adapter_stub.dart':
+      'platforms without dart:io (pinning is native only)',
 };
 
 void main(List<String> args) {
