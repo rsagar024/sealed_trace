@@ -59,7 +59,7 @@ void main() {
     expect(base.databaseDirectory, isNull);
     expect(base.sendUserDisplayName, isFalse);
     expect(base.allowInsecureHttp, isFalse);
-    expect(base.maskConfig.maskUserName, isTrue);
+    expect(base.maskConfig.maskUserName, isFalse);
     expect(base.maskConfig, const MaskConfig());
     expect(base.uploadConfig, const UploadConfig());
     expect(base.retentionConfig, const RetentionConfig());
@@ -84,10 +84,10 @@ void main() {
     expect(base.copyWith(appName: 'other'), isNot(base));
     expect(base.copyWith(sendUserDisplayName: true), isNot(base));
     expect(base.copyWith(allowInsecureHttp: true), isNot(base));
-    expect(const MaskConfig(maskUserName: false), isNot(const MaskConfig()));
+    expect(const MaskConfig(maskUserName: true), isNot(const MaskConfig()));
     expect(
-      const MaskConfig().copyWith(maskUserName: false),
-      const MaskConfig(maskUserName: false),
+      const MaskConfig().copyWith(maskUserName: true),
+      const MaskConfig(maskUserName: true),
     );
     expect(
       const MaskConfig(extraKeys: ['a']),

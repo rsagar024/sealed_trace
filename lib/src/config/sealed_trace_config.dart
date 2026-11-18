@@ -99,7 +99,7 @@ class SealedTraceConfig {
   ///
   /// It travels only inside the sealed envelope, but the server can read it.
   /// `MaskConfig.maskUserName` does not affect it: it only controls
-  /// `ctx.userName`, which is `***` by default.
+  /// `ctx.userName`, which is sent as given by default.
   final bool sendUserDisplayName;
 
   /// Allows a cleartext `http://` [baseUrl] when [env] is not `dev` or

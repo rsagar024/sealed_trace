@@ -74,9 +74,9 @@ Future<void> main() async {
   );
   debugPrint('example: init: ${SealedTrace.isInitialized}');
 
-  // User and device info, attached to every later event. The name is sent
-  // as *** by default; set sendUserDisplayName: true (and, if allowed,
-  // MaskConfig(maskUserName: false)) for readable names in the console.
+  // User and device info, attached to every later event. The id and name
+  // are sent unmasked; set MaskConfig(maskUserName: true) to send *** instead.
+  // sendUserDisplayName: true also fills the console's Users tab.
   SealedTrace.setUser('demo-user', name: 'Demo User');
   SealedTrace.setContext(await _deviceContext());
 

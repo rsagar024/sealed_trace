@@ -50,8 +50,8 @@ On start the screen logs one batch and flushes it, so it works without taps.
    });
    ```
    The `name` is trimmed, cut to 256 characters and sent as given in `ctx.userName` (plus `ctx.userDisplayName`
-   for the console's Users tab), so the console shows who each user is in the Users tab, the log list and log
-   detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
+   for the console's Users tab when `sendUserDisplayName: true`), so the console shows who each user is in the
+   log list and log detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
    `MaskConfig(maskUserName: true)` to send `***` in `ctx.userName` instead. `setUser(null)` clears both.
 
    The console's device card reads these keys, read with

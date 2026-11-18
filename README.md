@@ -179,11 +179,11 @@ Two rules to know up front:
      'deviceModel': '<device model>', // Android: androidInfo.model · iOS: iosInfo.modelName
    });
    ```
-   The `name` is trimmed and cut to 256 characters. **By default it never leaves the device readable:**
-   `ctx.userName` is sent as `***` and `ctx.userDisplayName` is not sent. To let the console show who each user
-   is, opt in: `sendUserDisplayName: true` sends the name as `ctx.userDisplayName` (Users tab), and
-   `MaskConfig(maskUserName: false)` sends it in `ctx.userName` (log list and detail). It travels only inside the
-   sealed envelope, but the server can read it, so opt in only if that is allowed for your users.
+   The `name` is trimmed and cut to 256 characters. **The id and name are sent unmasked:** the id as `userId`
+   and the name as `ctx.userName` (log list and detail). These are the only unmasked copies; the same name in a
+   message, metadata or `setContext` is still masked. Set `MaskConfig(maskUserName: true)` to send `***` in
+   `ctx.userName` instead. `sendUserDisplayName: true` also sends the name as `ctx.userDisplayName` (Users tab).
+   It travels only inside the sealed envelope, but the server can read it.
    `setUser(null)` clears both.
 
    The console's device card reads these keys, read with
@@ -247,7 +247,7 @@ Two rules to know up front:
 | `retentionConfig` | `RetentionConfig()` | [Retention](#retentionconfig). |
 | `networkLogConfig` | `NetworkLogConfig()` | [Dio interceptor](#networklogconfig). |
 | `verboseInternalLogs` | `false` | Prints the SDK's own diagnostics with `debugPrint`. These never contain log content. |
-| `sendUserDisplayName` | `false` | `true` also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. Off by default, so no readable name leaves the device. `maskUserName` does not affect it. |
+| `sendUserDisplayName` | `false` | `true` also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. `maskUserName` does not affect it. |
 | `aesGcmEncryptor` | `null` | Optional platform AES-256-GCM (for example CommonCrypto or Conscrypt through a plugin), used instead of the built-in pure-Dart cipher, which is table-based and not constant-time. It must reproduce the built-in output on known-answer cases at `init`, or it is reported through `onException` and ignored. A failing call falls back to the built-in cipher for that batch and is reported. |
 | `allowInsecureHttp` | `false` | Accepts an `http://` `baseUrl` in any `env`. Over plain HTTP the API key can be read and a network attacker can forge acknowledgements that delete pending logs. Never enable it in production. |
 | `databaseDirectory` | `null` | Where the SQLite file lives. Defaults to the application support directory. Pure-Dart apps must set it, or the SDK uses memory storage. |
@@ -266,7 +266,7 @@ Two rules to know up front:
 | `replacement` | `'***'` | Replacement text. |
 | `maskUrlPathSegments` | `false` | `true` replaces URL path segments that are not plain words in network logs: `/reset/9f8a2c` → `/reset/***`, `/users/asha.rao` → `/users/***`. Words, `-`, `_` and `v2`-style versions are kept. |
 | `pseudonymizeUserId` | `false` | `true` sends `SealedTrace.pseudonym(id)` instead of the `setUser` id, so events from one user still group but the raw id stays on the device. |
-| `maskUserName` | `true` | Sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. `false` sends the name as given so the console's log list and detail can show it. |
+| `maskUserName` | `false` | By default the `setUser(name:)` name is sent as given in `ctx.userName`, so the console's log list and detail can show it. `true` sends `replacement` instead. A name anywhere else is masked either way. |
 
 The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
 `X-Access-Token`, `X-Refresh-Token`, `X-Id-Token`, `X-CSRF-Token`, `X-XSRF-Token`, `X-Amz-Security-Token`,
@@ -343,7 +343,7 @@ SealedTrace.e('tag', 'message', error: error, stack: stack);
 SealedTrace.log(LogEvent(level: LogLevel.warning, tag: 'tag', message: 'message'));
 
 // Context: these do nothing before init has completed.
-SealedTrace.setUser('user-42', name: 'Asha');   // sent as *** unless you opt in (sendUserDisplayName, maskUserName)
+SealedTrace.setUser('user-42', name: 'Asha');   // id and name sent unmasked (maskUserName: true masks the name)
 SealedTrace.setContext({'deviceId': id, 'deviceModel': model});   // required keys; extra keys are allowed
 SealedTrace.addMaskKeys(['iban']);
 SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));   // unsafe or empty-matching patterns are reported, not added
@@ -595,8 +595,8 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 - **`userId`, `tag` and the device context are never masked.** Don't put personal data in them; send ids as
   `SealedTrace.pseudonym(...)` or set `MaskConfig(pseudonymizeUserId: true)`. On the web `os` is only the browser,
   its major version and the OS (for example `Chrome 157 on Windows`), never the full user agent. A name passed to
-  `setUser(name:)` stays on the device by default (`***` in `ctx.userName`, no `ctx.userDisplayName`). If you
-  opt in with `sendUserDisplayName: true` or `maskUserName: false`, the server can read it.
+  `setUser(name:)` is sent unmasked in `ctx.userName` by default, so the server can read it; set
+  `MaskConfig(maskUserName: true)` to send `***`. `ctx.userDisplayName` is sent only with `sendUserDisplayName: true`.
 - **Logs are not proof of origin.** The API key can be extracted from the app, so without attestation anyone can
   submit envelopes. See [Sender authenticity](#sender-authenticity).
 - **Key material is wiped on a best-effort basis.** After each seal the AES key, its expanded round keys, the
@@ -734,8 +734,8 @@ A server that works with the earlier 1.0.0 builds needs these changes before app
    CORS (`Access-Control-Allow-Headers`).
 7. If apps set `pinnedSpkiSha256`, rotate the TLS key only to a key whose pin the apps already ship.
 
-**What the console sees differently** (no API change): `ctx.userName` is `***` and `ctx.userDisplayName` is absent
-unless the app opts in (`maskUserName: false`, `sendUserDisplayName: true`). `userId` may be a `p_…` pseudonym
+**What the console sees differently** (no API change): `ctx.userName` holds the `setUser` name as given (`***` with
+`maskUserName: true`), and `ctx.userDisplayName` is absent unless the app sets `sendUserDisplayName: true`. `userId` may be a `p_…` pseudonym
 (`pseudonymizeUserId`). On the web, `ctx.os` is `Chrome 157 on Windows` rather than the full user agent. More values
 arrive as `***` (IP addresses, IBANs, Aadhaar, PAN, API keys, JWTs and others). `setContext` keeps at most 100 keys /
 16 KB.

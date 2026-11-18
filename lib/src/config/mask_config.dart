@@ -10,7 +10,7 @@ class MaskConfig {
     this.useDefaultKeys = true,
     this.useDefaultPatterns = true,
     this.replacement = '***',
-    this.maskUserName = true,
+    this.maskUserName = false,
     this.maskUrlPathSegments = false,
     this.pseudonymizeUserId = false,
   });
@@ -42,11 +42,15 @@ class MaskConfig {
   /// Text that replaces masked values.
   final String replacement;
 
-  /// When true (the default), the name passed to `SealedTrace.setUser(name:)`
-  /// is sent as [replacement] in `ctx.userName`. When false it is sent as
-  /// given, so the console's log list and log detail can show it. Either way
-  /// it travels only inside the sealed envelope. `ctx.userDisplayName` is
-  /// controlled separately by `SealedTraceConfig.sendUserDisplayName`.
+  /// When false (the default), the name passed to `SealedTrace.setUser(name:)`
+  /// is sent as given in `ctx.userName`, so the console's log list and log
+  /// detail can show it. When true it is sent as [replacement]. Either way it
+  /// travels only inside the sealed envelope.
+  ///
+  /// Only the `setUser` name is exempt: a name anywhere else (message,
+  /// metadata, `setContext`) is still masked, and `setContext` cannot set
+  /// `ctx.userName`. `ctx.userDisplayName` is controlled separately by
+  /// `SealedTraceConfig.sendUserDisplayName`.
   final bool maskUserName;
 
   /// When true, URL path segments that are not plain words are replaced in

@@ -67,8 +67,8 @@ void main() {
     expect(record.metadata['password'], '***');
     expect((record.metadata['profile'] as Map)['email'], '***');
     expect((record.metadata['profile'] as Map)['city'], 'Pune');
-    // M3: by default the name is masked and userDisplayName is not sent.
-    expect(record.ctx['userName'], '***');
+    // By default setUser's name is sent as given; userDisplayName is not sent.
+    expect(record.ctx['userName'], 'Asha Rao');
     expect(record.ctx.containsKey('userDisplayName'), isFalse);
     expect(record.ctx['contact'], '***');
     expect(record.userId, 'user-42');
