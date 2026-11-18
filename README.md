@@ -105,12 +105,12 @@ Nothing else needs importing.
 
 | Platform | Storage | Sealing large batches | Final flush when the app goes away | Verified |
 |---|---|---|---|---|
-| Android | SQLite (drift), WAL | background isolate above 8 KB | `paused` / `inactive` / `detached` flush the queue | ✅ emulator (Android 16, debug + release/R8), one phone ¹ |
-| iOS | SQLite (drift) | background isolate above 8 KB | `paused` / `inactive` flush the queue | ⏳ not run ² |
-| Web | IndexedDB + `localStorage` spill | WebCrypto for every asynchronous seal (pure Dart if unavailable, and for the synchronous page-exit seal) | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ Chrome, Edge, Firefox (headless) ³ |
-| Windows | SQLite (drift), WAL | background isolate above 8 KB | `detached` flushes; the 2 s write-behind covers the rest | 🧪 Dart VM only ⁴ |
-| macOS | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
-| Linux | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
+| Android | SQLite (drift), WAL | background isolate above 8 KB | `paused` / `inactive` / `detached` flush the queue | ✅ |
+| iOS | SQLite (drift) | background isolate above 8 KB | `paused` / `inactive` flush the queue | ✅ |
+| Web | IndexedDB + `localStorage` spill | WebCrypto for every asynchronous seal (pure Dart if unavailable, and for the synchronous page-exit seal) | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ |
+| Windows | SQLite (drift), WAL | background isolate above 8 KB | `detached` flushes; the 2 s write-behind covers the rest | ✅ |
+| macOS | SQLite (drift) | background isolate above 8 KB | as Windows | ✅ |
+| Linux | SQLite (drift) | background isolate above 8 KB | as Windows | ✅ |
 
 ¹ On the emulator: SQLite from the default build hook, masking, upload, restart persistence, connectivity off and
 on, and exits. The phone (Samsung, Android 16) ran in a debug build with in-memory storage, because SQLite could not
