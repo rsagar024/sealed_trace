@@ -1,7 +1,7 @@
 // A live example of the sealed_trace SDK.
 //
-// 1. Replace the placeholders below with your project's values from the
-//    SealedTrace console.
+// 1. Create an account at https://sealedtrace.duckdns.org, create a project,
+//    and replace the placeholders below with its values.
 // 2. Run with your environment's API key:
 //
 //      flutter run --dart-define=SEALED_TRACE_API_KEY=<your-api-key>
@@ -22,8 +22,8 @@ import 'package:sealed_trace/sealed_trace.dart';
 // Placeholders: replace with your project's values.
 // ---------------------------------------------------------------------------
 
-/// Your SealedTrace server.
-const baseUrl = 'https://YOUR-SEALEDTRACE-SERVER';
+/// The hosted SealedTrace server (change it only if you run your own).
+const baseUrl = 'https://sealedtrace.duckdns.org';
 
 /// Project id, from the console's project settings.
 const projectId = 'YOUR_PROJECT_ID';

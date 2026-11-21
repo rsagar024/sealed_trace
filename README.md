@@ -10,12 +10,16 @@
 **A logging SDK for Flutter and Dart that masks personal data on the device, seals every batch with encryption only
 your SealedTrace server can open, keeps it offline and uploads it reliably, and never throws into your app.**
 
+> 🔑 **Get your keys:** create an account at **[sealedtrace.duckdns.org](https://sealedtrace.duckdns.org)**, create a
+> project, and copy its project id, the environment's API key and the public key. Use
+> `https://sealedtrace.duckdns.org` as `baseUrl`. Step by step: [Getting your keys](#getting-your-keys).
+
 ```dart
 await SealedTrace.init(const SealedTraceConfig(
-  baseUrl: 'https://logs.example.com',
+  baseUrl: 'https://sealedtrace.duckdns.org',
   projectId: 'my-project',
   apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
-  publicKeyPem: projectPublicKeyPem,   // RSA-2048/3072/4096, from the SealedTrace console
+  publicKeyPem: projectPublicKeyPem,   // RSA-2048/3072/4096, from the console at sealedtrace.duckdns.org
   appName: 'shop',
 ));
 
@@ -145,14 +149,16 @@ Two rules to know up front:
 
 ## 📖 Quick start
 
-1. Add the dependency:
+1. Create an account at [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org), create a project, and copy its
+   project id, API key and public key ([how](#getting-your-keys)).
+2. Add the dependency:
    ```yaml
    dependencies:
      sealed_trace: ^1.0.0
    ```
-2. Do the [platform setup](#platform-setup): Android permissions, the macOS entitlement, and CORS on your server for
+3. Do the [platform setup](#platform-setup): Android permissions, the macOS entitlement, and CORS on your server for
    the web.
-3. At startup, listen for problems, then initialize:
+4. At startup, listen for problems, then initialize with the values from step 1:
    ```dart
    Future<void> main() async {
      WidgetsFlutterBinding.ensureInitialized();
@@ -160,7 +166,7 @@ Two rules to know up front:
        // The SDK never throws into your app; problems are reported here.
      };
      await SealedTrace.init(const SealedTraceConfig(
-       baseUrl: 'https://logs.example.com',
+       baseUrl: 'https://sealedtrace.duckdns.org',
        projectId: 'my-project',
        apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
        publicKeyPem: projectPublicKeyPem,
@@ -171,7 +177,7 @@ Two rules to know up front:
      runApp(const MyApp());
    }
    ```
-4. **Required:** attach the user and the device, right after `init`:
+5. **Required:** attach the user and the device, right after `init`:
    ```dart
    SealedTrace.setUser('<user id>', name: '<user name>');      // id: opaque, never an email; name: see below
    SealedTrace.setContext({
@@ -209,7 +215,7 @@ Two rules to know up front:
    - See `_deviceContext()` in
      [`example/lib/main.dart`](https://github.com/rsagar024/sealed_trace/blob/master/example/lib/main.dart) for the
      full code.
-5. Log anywhere. Every call returns at once and never throws:
+6. Log anywhere. Every call returns at once and never throws:
    ```dart
    SealedTrace.v('cache', 'hit', meta: {'key': 'home'});
    SealedTrace.d('cache', 'miss');
@@ -218,7 +224,7 @@ Two rules to know up front:
    SealedTrace.e('payment', 'charge failed', error: e, stack: s);
    SealedTrace.f('app', 'unrecoverable', error: e, stack: s);
    ```
-6. Optionally, add the Dio interceptor, and clear on sign-out:
+7. Optionally, add the Dio interceptor, and clear on sign-out:
    ```dart
    final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 
@@ -424,12 +430,33 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 
 ## 🔑 Getting your keys
 
+All four values come from the hosted SealedTrace console at
+**[https://sealedtrace.duckdns.org](https://sealedtrace.duckdns.org)**:
+
+1. Open [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org) and create an account (or sign in).
+2. Create a project, one per app. Its settings show the **project id** (`projectId`).
+3. Open an environment of the project (for example `dev` or `prod`) and copy its **API key** (`apiKey`). Each
+   environment has its own key; set `env` to the same name.
+4. Copy the project's **public key** (`publicKeyPem`), the whole PEM block including the `BEGIN`/`END` lines.
+5. Use `https://sealedtrace.duckdns.org` as `baseUrl`.
+
+```dart
+await SealedTrace.init(const SealedTraceConfig(
+  baseUrl: 'https://sealedtrace.duckdns.org',
+  projectId: '<project id from step 2>',
+  apiKey: '<API key from step 3>',
+  publicKeyPem: projectPublicKeyPem, // the PEM from step 4
+  appName: 'shop',
+  env: SealedTraceEnv.prod,          // the environment whose key you copied
+));
+```
+
 | Config field | Where it comes from | Notes |
 |---|---|---|
-| `baseUrl` | your SealedTrace server | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
-| `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
-| `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. **Publishable, not secret:** `--dart-define` and obfuscation do not stop extraction. |
-| `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, 3072 or 4096, SPKI or PKCS#1 PEM. Each envelope names its key by `kid`, so you can rotate keys: keep the old private key on the server until devices have uploaded what they sealed with it. The **private** key stays on the server; never put it in an app. Release builds refuse the repository's test key (its private key is public). |
+| `baseUrl` | `https://sealedtrace.duckdns.org` (or your own server if you run one) | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
+| `projectId` | [console](https://sealedtrace.duckdns.org), project settings | One per app; shared by all of its environments. |
+| `apiKey` | [console](https://sealedtrace.duckdns.org), project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. **Publishable, not secret:** `--dart-define` and obfuscation do not stop extraction. |
+| `publicKeyPem` | [console](https://sealedtrace.duckdns.org), project encryption key | RSA-2048, 3072 or 4096, SPKI or PKCS#1 PEM. Each envelope names its key by `kid`, so you can rotate keys: keep the old private key on the server until devices have uploaded what they sealed with it. The **private** key stays on the server; never put it in an app. Release builds refuse the repository's test key (its private key is public). |
 
 - Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
@@ -480,7 +507,7 @@ import 'package:flutter/services.dart' show appFlavor;
 Future<void> initForFlavor() async {
   await SealedTrace.init(
     SealedTraceConfig(
-      baseUrl: 'https://logs.example.com',
+      baseUrl: 'https://sealedtrace.duckdns.org',
       projectId: 'my-project',
       apiKey: const String.fromEnvironment('SEALED_TRACE_API_KEY'),
       publicKeyPem: projectPublicKeyPem,
@@ -496,7 +523,8 @@ Future<void> initForFlavor() async {
 flutter run --flavor stage --dart-define-from-file=env/stage.json
 ```
 
-Adding an environment later needs no SDK update: create it on the dashboard, copy its key into a new define file,
+Adding an environment later needs no SDK update: create it on the
+[dashboard](https://sealedtrace.duckdns.org), copy its key into a new define file,
 and add the flavor. Flavor names must follow the `env` rules (lowercase, 1–32 chars of `a-z`, `0-9`, `_`, `-`).
 
 <a id="platform-setup"></a>
@@ -786,7 +814,9 @@ your own server:
 - a user id and display name, and device context from `device_info_plus`;
 - Flush, live diagnostics and the upload result.
 
-Replace the `baseUrl`, `projectId` and `projectPublicKeyPem` placeholders in `example/lib/main.dart`, then:
+Create a project at [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org) and replace the `projectId` and
+`projectPublicKeyPem` placeholders in `example/lib/main.dart` with its values (`baseUrl` already points at
+`https://sealedtrace.duckdns.org`), then:
 
 ```sh
 cd example

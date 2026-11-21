@@ -45,20 +45,29 @@ class SealedTraceConfig {
   });
 
   /// Server base URL. Uploads go to `{baseUrl}/api/v1/ingest/logs`.
+  ///
+  /// For the hosted SealedTrace server, use `https://sealedtrace.duckdns.org`.
   final String baseUrl;
 
   /// Project identifier (uuid) issued by the SealedTrace platform.
+  ///
+  /// Create an account and a project at https://sealedtrace.duckdns.org to
+  /// get one.
   final String projectId;
 
   /// Project API key sent as `X-Api-Key`.
+  ///
+  /// Each environment of the project has its own key, shown in the console at
+  /// https://sealedtrace.duckdns.org.
   ///
   /// A publishable identifier, not a secret: anything compiled into an app
   /// can be extracted. Rely on server-side rate limits and, optionally,
   /// `UploadConfig.attestationTokenProvider` to tell genuine apps apart.
   final String apiKey;
 
-  /// Project RSA-2048 public key in PEM form. Only the server holds the
-  /// private key, so the device can never read logs back.
+  /// Project RSA public key (2048, 3072 or 4096 bits) in PEM form, copied
+  /// from the project's settings at https://sealedtrace.duckdns.org. Only the
+  /// server holds the private key, so the device can never read logs back.
   final String publicKeyPem;
 
   /// Name of the host application.

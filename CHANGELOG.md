@@ -2,6 +2,10 @@
 
 First release.
 
+Get started: create an account and a project at
+https://sealedtrace.duckdns.org, the hosted console and ingest server, to get
+the project id, API key and public key. See "Getting your keys" in the README.
+
 ### Features
 
 - `SealedTrace` facade: `init`, six log levels (`v`, `d`, `i`, `w`, `e`, `f`),
