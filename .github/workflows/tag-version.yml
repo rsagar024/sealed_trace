@@ -1,0 +1,53 @@
+# Tags master with the package version.
+#
+# On every push to master (a merged pull request included), reads `version:`
+# from pubspec.yaml and creates the tag `v<version>` (for example `v1.0.0`) on
+# that commit. If the tag already exists, because the version was not bumped,
+# nothing happens. This workflow only tags; it never publishes the package.
+name: Tag version
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tag-version
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from pubspec.yaml
+        id: version
+        run: |
+          raw="$(grep -m1 -E '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]*(#.*)?$//; s/^["'\'']//; s/["'\'']$//')"
+          version="${raw%%+*}"   # drop build metadata such as +3
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error file=pubspec.yaml::version '$raw' is not a semantic version"
+            exit 1
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Package version: $version"
+
+      - name: Create tag if missing
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists; bump version in pubspec.yaml to tag a new release."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "Created tag $TAG on $GITHUB_SHA"
