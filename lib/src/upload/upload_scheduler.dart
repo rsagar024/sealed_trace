@@ -81,6 +81,8 @@ class UploadScheduler {
   Future<UploadResult>? _queued;
   Timer? _intervalTimer;
   Timer? _retryTimer;
+  Timer? _resumeTimer;
+  int _authFailures = 0;
   StreamSubscription<bool>? _connectivitySubscription;
   final Set<String> _inFlight = <String>{};
 
@@ -88,7 +90,36 @@ class UploadScheduler {
   Set<String> get inFlightIds => _inFlight;
 
   /// Whether uploads are paused because the server rejected the API key.
+  /// The pause ends by itself after [authPause]; the next cycle then probes.
   bool get isPaused => _paused;
+
+  /// Stored bytes of pending rows fetched as candidates for one request.
+  ///
+  /// A request can never carry more than [BatchPacker.maxRequestBytes], so
+  /// fetching more is pointless. This replaces `1 << 40`, which dart2js
+  /// evaluates to 0 because its shifts are 32-bit (L11), so web clients
+  /// fetched one envelope per request.
+  static const int candidateBytes = BatchPacker.maxRequestBytes;
+
+  /// First pause after a 401/403 from the ingest server (a JSON body).
+  static const Duration authPauseConfirmed = Duration(hours: 1);
+
+  /// First pause after a 401/403 that did not look like the ingest server's
+  /// (no JSON object body: a captive portal, WAF or misrouted CDN).
+  static const Duration authPauseUnconfirmed = Duration(minutes: 5);
+
+  /// Longest pause; each repeated 401/403 doubles it up to this.
+  static const Duration authPauseMax = Duration(hours: 12);
+
+  /// The pause for the [failures]-th 401/403 in a row.
+  static Duration authPause(int failures, {required bool confirmed}) {
+    final base = confirmed ? authPauseConfirmed : authPauseUnconfirmed;
+    final shift = (failures - 1).clamp(0, 20);
+    final ms = base.inMilliseconds * (1 << shift);
+    return ms >= authPauseMax.inMilliseconds
+        ? authPauseMax
+        : Duration(milliseconds: ms);
+  }
 
   /// Finishes any delete that a crash interrupted, starts the timers and the
   /// connectivity listener, and kicks off the cold-start cycle.
@@ -158,6 +189,8 @@ class UploadScheduler {
     _intervalTimer = null;
     _retryTimer?.cancel();
     _retryTimer = null;
+    _resumeTimer?.cancel();
+    _resumeTimer = null;
     // Cancel first, before any await, so a request in progress ends at once.
     client.cancelInFlight();
     await _connectivitySubscription?.cancel();
@@ -219,7 +252,7 @@ class UploadScheduler {
     while (!_disposed && !_paused && retryIn == null) {
       final rows = await store.nextPending(
         limit: limit,
-        maxBytes: 1 << 40,
+        maxBytes: candidateBytes,
         exclude: failedIds,
       );
       if (rows.isEmpty) break;
@@ -257,7 +290,7 @@ class UploadScheduler {
         case IngestUnauthorized():
           counters.uploadFailures++;
           totals.unauthorized = true;
-          _pause(outcome.status);
+          _pause(outcome);
         case IngestTooLarge():
           counters.uploadFailures++;
           if (packed.rows.length > 1) {
@@ -271,6 +304,13 @@ class UploadScheduler {
           _consecutiveFailures++;
           hadFailure = true;
           retryIn = outcome.retryAfter ?? backoff.delay(_consecutiveFailures);
+        case IngestAttestationUnavailable():
+          // Nothing reached the server: back off, but charge no attempt.
+          counters.uploadFailures++;
+          failedIds.addAll(ids);
+          _consecutiveFailures++;
+          hadFailure = true;
+          retryIn = backoff.delay(_consecutiveFailures);
         case IngestServerError():
         case IngestNetworkError():
         case IngestTimeout():
@@ -293,6 +333,11 @@ class UploadScheduler {
     }
 
     if (!hadFailure && !totals.cancelled) _consecutiveFailures = 0;
+    if (totals.accepted > 0 || totals.duplicate > 0) {
+      // The key works again: a later 401/403 starts a fresh episode.
+      _authFailures = 0;
+      _pauseReported = false;
+    }
     if (hadFailure && retryIn == null) {
       // Rejections the server called transient: retry later, with backoff.
       _consecutiveFailures++;
@@ -395,11 +440,14 @@ class UploadScheduler {
         case IngestUnauthorized():
           counters.uploadFailures++;
           totals.unauthorized = true;
-          _pause(outcome.status);
+          _pause(outcome);
           return null;
         case IngestRateLimited():
           counters.uploadFailures++;
           return outcome.retryAfter ?? backoff.delay(_consecutiveFailures + 1);
+        case IngestAttestationUnavailable():
+          counters.uploadFailures++;
+          return backoff.delay(_consecutiveFailures + 1);
         case IngestTooLarge():
         case IngestServerError():
         case IngestNetworkError():
@@ -413,15 +461,33 @@ class UploadScheduler {
     return null;
   }
 
-  void _pause(int status) {
+  /// Pauses uploads after a 401/403, then probes again by itself (L7): a
+  /// captive portal, WAF or misrouted CDN can answer 401/403 too, and a
+  /// session-long pause would let logs pile up until retention purges them.
+  /// No attempt is burned. Reported once per episode.
+  void _pause(IngestUnauthorized outcome) {
     _paused = true;
+    _authFailures++;
     _retryTimer?.cancel();
     _retryTimer = null;
+    final delay = authPause(_authFailures, confirmed: outcome.fromIngestServer);
+    _resumeTimer?.cancel();
+    _resumeTimer = Timer(delay, () {
+      _resumeTimer = null;
+      if (_disposed) return;
+      _paused = false;
+      unawaited(request(UploadTrigger.retry));
+    });
     if (!_pauseReported) {
       _pauseReported = true;
+      final why = outcome.fromIngestServer
+          ? 'the server rejected the API key'
+          : 'an answer without the ingest server\'s JSON body '
+                '(a captive portal or proxy?)';
       onError(
         StateError(
-          'Uploads paused: the server rejected the API key (HTTP $status)',
+          'Uploads paused: $why (HTTP ${outcome.status}); '
+          'retrying in ${delay.inMinutes} min',
         ),
         StackTrace.current,
       );

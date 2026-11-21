@@ -24,6 +24,7 @@ environment:
 # server implementers need it to check the vectors (IMPLEMENTATION.md A67).
 false_secrets:
   - /test/helpers/test_keys.dart
+  - /test/helpers/tls_test_cert.dart
   - /test/vectors/envelope_vectors.json
 
 platforms:

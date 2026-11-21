@@ -46,12 +46,17 @@ class _SpyAdapter extends MemoryStorageAdapter {
 late Directory _tempRoot;
 final DateTime _fixedNow = DateTime.utc(2026, 6, 1, 12);
 
-void _install({StorageAdapter? storage, RuntimeOverrides? custom}) {
+void _install({
+  StorageAdapter? storage,
+  RuntimeOverrides? custom,
+  Duration? purgeInterval,
+}) {
   SealedTrace.debugOverrides =
       custom ??
       RuntimeOverrides(
         disableUploads: true,
         storage: storage,
+        purgeInterval: purgeInterval,
         lifecycle: FakeLifecycle(),
         deviceContext: testDevice,
         clock: FakeClock(_fixedNow),
@@ -108,9 +113,8 @@ void main() {
 
         final row = (await adapter.fetch([index.single.batchId])).single;
         expect(row.envelope.projectId, 'proj-1');
-        expect(row.envelope.seqMin, 1);
-        expect(row.envelope.seqMax, 2);
-        expect(row.envelope.topLevels, 'info,error');
+        expect(await sealedSeqs(row.envelope), [1, 2]);
+        expect(row.envelope.topLevels, '', reason: 'L6');
         final events = jsonDecode(await openEnvelope(row.envelope)) as List;
         expect((events.first as Map)['message'], 'login for ***');
       },
@@ -145,7 +149,9 @@ void main() {
     test('init moves envelopes left in the spill into storage', () async {
       final adapter = MemoryStorageAdapter();
       final spill = MemoryEnvelopeSpill()
-        ..write(makeEnvelope(id: 'left-behind', eventCount: 2));
+        ..write(
+          makeEnvelope(id: 'left-behind', eventCount: 2, projectId: 'proj-1'),
+        );
       _install(custom: overrides(adapter, spill, FakeLifecycle()));
       await SealedTrace.init(_config);
 
@@ -209,7 +215,7 @@ void main() {
       final rows = await adapter.listIndex();
       final seqs = [
         for (final r in await adapter.fetch(rows.map((r) => r.batchId)))
-          r.envelope.seqMin,
+          (await sealedSeqs(r.envelope)).first,
       ];
       // Both rows share the fake clock's timestamp, so their order is not
       // meaningful; compare as a sorted list. Run one reserved 1..100 and run
@@ -247,7 +253,11 @@ void main() {
         final row = (await adapter.fetch(
           (await adapter.listIndex()).map((r) => r.batchId),
         )).single;
-        expect(row.envelope.seqMin, 4, reason: 'seq is never reused');
+        expect(
+          (await sealedSeqs(row.envelope)).first,
+          4,
+          reason: 'seq is never reused',
+        );
       },
     );
 
@@ -308,14 +318,13 @@ void main() {
 
     test('the periodic timer purges rows that expire later', () async {
       final adapter = MemoryStorageAdapter();
-      _install(storage: adapter);
-      await SealedTrace.init(
-        _config.copyWith(
-          retentionConfig: const RetentionConfig(
-            purgeInterval: Duration(milliseconds: 40),
-          ),
-        ),
+      _install(
+        storage: adapter,
+        purgeInterval: const Duration(milliseconds: 40),
       );
+      // The config's purgeInterval has a 1-minute floor (L2); the test-only
+      // override keeps this test fast.
+      await SealedTrace.init(_config);
       expect(SealedTrace.diagnostics.purgedRows, 0);
 
       await adapter.insertEnvelope(
@@ -455,9 +464,11 @@ void main() {
         (await adapter.listIndex()).map((r) => r.batchId),
       );
       expect(rows, hasLength(2));
-      expect(rows[0].envelope.seqMin, 1);
-      expect(rows[1].envelope.seqMin, greaterThan(rows[0].envelope.seqMax));
-      expect(rows[1].envelope.seqMin, 101);
+      final first = await sealedSeqs(rows[0].envelope);
+      final second = await sealedSeqs(rows[1].envelope);
+      expect(first.first, 1);
+      expect(second.first, greaterThan(first.last));
+      expect(second.first, 101);
 
       for (final row in rows) {
         final text = await openEnvelope(row.envelope);

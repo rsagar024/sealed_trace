@@ -41,6 +41,7 @@ void runStorageAdapterContract(
       expect(actual.maxTs, expected.maxTs);
       expect(actual.topLevels, expected.topLevels);
       expect(actual.payloadSize, expected.payloadSize);
+      expect(actual.kid, expected.kid);
     }
 
     test('an empty store lists nothing', () async {
@@ -90,6 +91,32 @@ void runStorageAdapterContract(
       await adapter.insertEnvelope(EnvelopeRow.pending(envelope));
       final back = (await adapter.fetch([envelope.batchId])).single.envelope;
       expectSameEnvelope(back, envelope);
+    });
+
+    test('I3: kid, its absence and larger wrapped keys round-trip', () async {
+      final v3 = makeEnvelope(kid: 'i5AhdjEFUP1jG9OUOECv9Q');
+      final legacy = makeEnvelope(kid: null);
+      final rsa4096 = makeEnvelope(wrappedKeyLength: 512);
+      for (final e in [v3, legacy, rsa4096]) {
+        await adapter.insertEnvelope(EnvelopeRow.pending(e));
+      }
+      final back = {
+        for (final row in await adapter.fetch([
+          v3.batchId,
+          legacy.batchId,
+          rsa4096.batchId,
+        ]))
+          row.envelope.batchId: row.envelope,
+      };
+      expectSameEnvelope(back[v3.batchId]!, v3);
+      expectSameEnvelope(back[legacy.batchId]!, legacy);
+      expect(back[legacy.batchId]!.kid, isNull);
+      expect(back[legacy.batchId]!.version, legacyEnvelopeVersion);
+      expectSameEnvelope(back[rsa4096.batchId]!, rsa4096);
+      expect(
+        back[rsa4096.batchId]!.algorithm,
+        'RSA-OAEP-4096-SHA256+AES-256-GCM',
+      );
     });
 
     test('a 1 MB ciphertext round-trips', () async {

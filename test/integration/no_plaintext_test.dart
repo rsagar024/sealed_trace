@@ -39,9 +39,9 @@ const _markers = <String>[
   'hunter2-marker-pass',
 ];
 
-/// A credential in manually logged metadata under a key the default list
-/// does not contain (`Authorization`, A53). Masking keeps it by design, so
-/// only encryption protects it; the README tells apps to add the key.
+/// A credential in manually logged metadata under `Authorization` (A53).
+/// Since H2 the key matches the `authorization` fragment and is masked, and
+/// encryption protects it as well.
 const _bearer = 'Bearer marker-token-abc';
 
 void main() {
@@ -174,8 +174,8 @@ void main() {
     expect(opened, contains('***'));
     expect(opened, contains(_sentinel)); // it was logged, just never in clear
     expect(_markers.where(opened.contains).toList(), isEmpty);
-    // Documented gap: not masked under the default key list, still encrypted.
-    expect(opened, contains(_bearer));
+    // H2: credential keys outside the exact list are masked too.
+    expect(opened, isNot(contains(_bearer)));
   });
 
   test(

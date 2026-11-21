@@ -48,6 +48,7 @@ class DriftStorageAdapter implements StorageAdapter {
               maxTs: e.maxTs,
               topLevels: e.topLevels,
               uploadedAt: Value(row.uploadedAt),
+              kid: Value(e.kid),
             ),
           );
     } catch (error) {
@@ -190,6 +191,7 @@ class DriftStorageAdapter implements StorageAdapter {
       maxTs: r.maxTs,
       topLevels: r.topLevels,
       payloadSize: r.payloadSize,
+      kid: r.kid,
     ),
     uploadState: r.uploadState,
     attempts: r.attempts,

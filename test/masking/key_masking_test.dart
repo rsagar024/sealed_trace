@@ -12,7 +12,11 @@ void main() {
       'password', 'pass', 'pwd', 'token', 'secret', 'auth', 'apikey',
       'api_key', 'access_token', 'refresh_token', 'firstName', 'lastName',
       'name', 'first_name', 'last_name', 'fName', 'lName', 'email', 'phone',
-      'dob', 'ssn', 'cvv', //
+      'dob', 'ssn', 'cvv', 'username', 'otp', 'pin', 'mpin', 'cvc', 'session',
+      'sessionId', 'sid', 'cardNumber', 'ccNumber', 'client_secret',
+      'authCode', 'iban', 'passport', 'passportNumber', 'passportNo', 'aadhaar',
+      'aadhar', 'aadhaarNumber', 'panNumber', 'panCard', 'nationalId', 'taxId',
+      'ip', 'ipAddress', 'clientIp', //
     ]);
   });
 
@@ -63,18 +67,24 @@ void main() {
 
   test('near-miss keys are not masked', () {
     final out = _engine().maskMap({
-      'username': 'u',
       'filename': 'f.txt',
-      'passport': 'P1',
+      'compass': 'N',
       'names': 'n',
-      'passwordHint': 'h',
+      'author': 'a',
+      'authority': 'b',
+      'authorName': 'c',
+      'pinned': true,
+      'sidebar': 'left',
     });
     expect(out, {
-      'username': 'u',
       'filename': 'f.txt',
-      'passport': 'P1',
+      'compass': 'N',
       'names': 'n',
-      'passwordHint': 'h',
+      'author': 'a',
+      'authority': 'b',
+      'authorName': 'c',
+      'pinned': true,
+      'sidebar': 'left',
     });
   });
 
@@ -104,9 +114,9 @@ void main() {
 
   test('addKeys takes effect for later calls only', () {
     final engine = _engine();
-    expect(engine.maskMap({'iban': 'X'}), {'iban': 'X'});
-    engine.addKeys(['IBAN']);
-    expect(engine.maskMap({'iban': 'X'}), {'iban': '***'});
+    expect(engine.maskMap({'memberNo': 'X'}), {'memberNo': 'X'});
+    engine.addKeys(['MEMBER_NO']);
+    expect(engine.maskMap({'memberNo': 'X'}), {'memberNo': '***'});
   });
 
   test('the replacement text is configurable', () {
@@ -142,5 +152,151 @@ void main() {
     _engine().maskMap(input);
     expect(input['password'], 'p');
     expect(((input['list']! as List).first as Map)['token'], 't');
+  });
+
+  group('H2: normalized and fragment key matching', () {
+    test('separator and case variants of a default key match', () {
+      for (final key in [
+        'accessToken',
+        'access-token',
+        'ACCESS_TOKEN',
+        'Access.Token',
+        'api-key',
+        'refreshToken',
+        'sessionId',
+        'session_id',
+        'client-secret',
+        'firstName',
+        'FIRST-NAME',
+      ]) {
+        expect(_engine().maskMap({key: 'v'}), {key: '***'}, reason: key);
+      }
+    });
+
+    test('keys holding a credential fragment match', () {
+      for (final key in [
+        'id_token',
+        'idToken',
+        'x-auth-token',
+        'csrfToken',
+        'clientSecretValue',
+        'oldPassword',
+        'passwordHint',
+        'db_passwd',
+        'passphrase',
+        'awsCredentials',
+        'googleApiKey',
+        'private_key',
+        'authorization',
+        'cookie',
+        'jwt',
+      ]) {
+        expect(_engine().maskMap({key: 'v'}), {key: '***'}, reason: key);
+      }
+    });
+
+    test('keys ending with auth match; author and authority do not', () {
+      for (final key in ['oauth', 'basicAuth', 'x-auth', 'auth']) {
+        expect(_engine().isSensitiveKey(key), isTrue, reason: key);
+      }
+      for (final key in ['author', 'authority', 'authors', 'authorId']) {
+        expect(_engine().isSensitiveKey(key), isFalse, reason: key);
+      }
+    });
+
+    test('new exact keys match', () {
+      for (final key in [
+        'username',
+        'otp',
+        'pin',
+        'mpin',
+        'cvc',
+        'session',
+        'sid',
+        'card_number',
+        'ccNumber',
+        'authCode',
+      ]) {
+        expect(_engine().isSensitiveKey(key), isTrue, reason: key);
+      }
+    });
+
+    test('useDefaultKeys: false turns fragments off too', () {
+      final engine = _engine(const MaskConfig(useDefaultKeys: false));
+      expect(engine.isSensitiveKey('accessToken'), isFalse);
+      expect(engine.isSensitiveKey('oauth'), isFalse);
+    });
+
+    test('extraKeys are normalized the same way', () {
+      final engine = _engine(const MaskConfig(extraKeys: ['national_id']));
+      expect(engine.isSensitiveKey('nationalId'), isTrue);
+      expect(engine.isSensitiveKey('NATIONAL-ID'), isTrue);
+    });
+
+    test('an OAuth token response is fully masked', () {
+      final out = _engine().maskMap({
+        'access_token': 'at-1',
+        'id_token': 'it-1',
+        'refresh_token': 'rt-1',
+        'token_type': 'Bearer',
+        'expires_in': 3600,
+        'scope': 'openid',
+      });
+      expect(out, {
+        'access_token': '***',
+        'id_token': '***',
+        'refresh_token': '***',
+        'token_type': '***',
+        'expires_in': 3600,
+        'scope': 'openid',
+      });
+    });
+  });
+
+  group('M4: PII in map keys', () {
+    test('a key holding PII is masked, its value is kept', () {
+      final out = _engine().maskMap({
+        'asha@example.com': {'orders': 3},
+        'city': 'Pune',
+      });
+      expect(out, {
+        '***': {'orders': 3},
+        'city': 'Pune',
+      });
+    });
+
+    test('keys that mask to the same text stay distinct', () {
+      final out = _engine().maskMap({
+        'a@example.com': 1,
+        'b@example.com': 2,
+        'c@example.com': 3,
+      });
+      expect(out, {'***': 1, '***#2': 2, '***#3': 3});
+    });
+
+    test('nested maps and context keys too', () {
+      final out = _engine().maskMap({
+        'byIp': {'192.168.1.1': 'blocked'},
+      });
+      expect(out, {
+        'byIp': {'***': 'blocked'},
+      });
+    });
+
+    test('new identity keys are masked', () {
+      for (final key in [
+        'iban',
+        'passport',
+        'passport_number',
+        'aadhaar',
+        'pan_number',
+        'national_id',
+        'tax-id',
+        'ipAddress',
+        'client_ip',
+      ]) {
+        expect(_engine().isSensitiveKey(key), isTrue, reason: key);
+      }
+    });
   });
 }

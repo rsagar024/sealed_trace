@@ -97,7 +97,7 @@ void main() {
         'username=asha&password=hunter2&name=Asha+Rao&q=ok&q=again&token=tok_abc123',
         contentType: 'application/x-www-form-urlencoded',
       );
-      expect(out, contains('username=asha'), reason: 'near-miss key kept');
+      expect(out, contains('username=***'), reason: 'username is sensitive');
       expect(out, contains('q=ok&q=again'));
       expect(out, contains('password=***'));
       expect(out, contains('name=***'));
@@ -122,15 +122,21 @@ void main() {
     test('XML and HTML tags', () {
       final out = _clean(
         '<login><name>Asha</name><password>hunter2</password>'
-        '<passwordHint>blue</passwordHint><city>Pune</city></login>',
+        '<passwordHint>blue</passwordHint><author>Ravi</author>'
+        '<city>Pune</city></login>',
         contentType: 'application/xml',
       );
       expect(out, contains('<password>***</password>'));
       expect(out, contains('<name>***</name>'));
       expect(
         out,
-        contains('<passwordHint>blue</passwordHint>'),
-        reason: 'a different tag is not a sensitive key',
+        contains('<passwordHint>***</passwordHint>'),
+        reason: 'a key containing "password" is sensitive',
+      );
+      expect(
+        out,
+        contains('<author>Ravi</author>'),
+        reason: 'author is not an auth key',
       );
       expect(out, contains('<city>Pune</city>'));
       expect(out, isNot(contains('hunter2')));
@@ -183,8 +189,8 @@ void main() {
     });
 
     test('words that merely contain a sensitive key are left alone', () {
-      final out = _clean('username: asha, filename=report.pdf, passport ok');
-      expect(out, 'username: asha, filename=report.pdf, passport ok');
+      final out = _clean('author: ravi, filename=report.pdf, passport ok');
+      expect(out, 'author: ravi, filename=report.pdf, passport ok');
     });
 
     test('keys added at runtime are masked in text too', () {
@@ -387,6 +393,53 @@ void main() {
         expect(out, isNotNull);
         expect(watch.elapsedMilliseconds, lessThan(2000), reason: name);
       });
+    });
+  });
+
+  group('H2: tokens in bodies', () {
+    const jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJlLXZhbHVl';
+
+    test('a Bearer token inside a JSON value is masked', () {
+      final out = _clean('{"header":"Bearer $jwt","note":"ok"}');
+      expect(out, isNot(contains('eyJ')));
+      expect(out, contains('"note":"ok"'));
+    });
+
+    test('a JWT under an unlisted JSON key is masked', () {
+      final out = _clean({
+        'whatever': jwt,
+        'list': [jwt],
+      });
+      expect(out, isNot(contains('eyJ')));
+    });
+
+    test('an OAuth token response keeps nothing in clear', () {
+      final out = _clean(
+        '{"access_token":"ya29.a0AfH6SMB-live","id_token":"$jwt",'
+        '"refresh_token":"1//0g-refresh","token_type":"Bearer",'
+        '"expires_in":3599}',
+        contentType: 'application/json',
+      );
+      for (final s in ['ya29', 'eyJ', '1//0g']) {
+        expect(out, isNot(contains(s)), reason: s);
+      }
+      expect(out, contains('"expires_in":3599'));
+    });
+
+    test('camelCase and dashed keys in text bodies are masked', () {
+      final out = _clean(
+        'accessToken=abc123 client-secret: def456 '
+        '<idToken>ghi789</idToken> note:password=hunter2',
+      );
+      for (final s in ['abc123', 'def456', 'ghi789', 'hunter2']) {
+        expect(out, isNot(contains(s)), reason: s);
+      }
+    });
+
+    test('credential headers inside text bodies are masked', () {
+      final out = _clean('X-Auth-Token: tkn-1\nX-Goog-Api-Key: AIzaXYZ');
+      expect(out, isNot(contains('tkn-1')));
+      expect(out, isNot(contains('AIzaXYZ')));
     });
   });
 }

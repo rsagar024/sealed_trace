@@ -67,9 +67,9 @@ void main() {
       );
     });
 
-    test('1024-bit and 3072-bit RSA keys', () {
+    test('1024-bit and 2560-bit RSA keys (unsupported sizes)', () {
       _rejects(testPublicKey1024, reason: '1024');
-      _rejects(testPublicKey3072, reason: '3072');
+      _rejects(testPublicKey2560, reason: '2560');
     });
 
     test('an elliptic-curve key', () {

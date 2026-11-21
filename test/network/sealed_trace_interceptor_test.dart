@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sealed_trace/sealed_trace.dart';
+import 'package:sealed_trace/src/network/body_sanitizer.dart';
 import 'package:sealed_trace/src/event/log_record.dart';
 import 'package:sealed_trace/src/facade/runtime_overrides.dart';
 import 'package:sealed_trace/src/storage/memory_storage_adapter.dart';
@@ -817,5 +818,43 @@ void main() {
       '${(logged / calls).toStringAsFixed(0)} µs with the interceptor',
     );
     expect(logged / calls, lessThan(20000));
+  });
+
+  group('M5: a large response is sanitized off the UI isolate', () {
+    test('the event still arrives, fully masked', () async {
+      await env.start();
+      final body = jsonEncode({
+        'items': [
+          for (var i = 0; i < 2000; i++)
+            {'id': i, 'email': 'user$i@example.com', 'password': 'pw-$i'},
+        ],
+      });
+      expect(body.length, greaterThan(BodySanitizer.offloadChars));
+      env.server.enqueue(FakeResponse(200, body: body, headers: _jsonHeaders));
+      final dio = env.newDio(interceptor: SealedTraceInterceptor());
+      await dio.get<dynamic>('https://api.example.com/big');
+
+      // The isolate takes longer than the usual 20 ms; wait for it.
+      var events = <LogRecord>[];
+      for (var i = 0; i < 100 && events.isEmpty; i++) {
+        events = await env.events();
+      }
+      expect(events, hasLength(1));
+      final responseBody = events.single.metadata['responseBody'] as String;
+      expect(responseBody, isNot(contains('@example.com')));
+      expect(responseBody, isNot(contains('pw-1')));
+      expect(responseBody, contains('"password":"***"'));
+    });
+
+    test('nothing is logged if the SDK is disposed meanwhile', () async {
+      await env.start();
+      final body = jsonEncode({'blob': 'a' * 100000});
+      env.server.enqueue(FakeResponse(200, body: body, headers: _jsonHeaders));
+      final dio = env.newDio(interceptor: SealedTraceInterceptor());
+      await dio.get<dynamic>('https://api.example.com/big');
+      await SealedTrace.dispose();
+      await Future<void>.delayed(const Duration(seconds: 2));
+      expect(env.records.where((r) => r.tag == 'network'), isEmpty);
+    });
   });
 }

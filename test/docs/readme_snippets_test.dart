@@ -24,9 +24,9 @@ Future<void> quickStart() async {
   };
   await SealedTrace.init(
     const SealedTraceConfig(
-      baseUrl: 'https://logs.example.com',
+      baseUrl: 'https://sealedtrace.duckdns.org',
       projectId: 'my-project',
-      apiKey: 'sk_live_…',
+      apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
       publicKeyPem: projectPublicKeyPem,
       appName: 'shop',
       env: SealedTraceEnv.prod,
@@ -38,7 +38,7 @@ Future<void> quickStart() async {
 Future<void> initForFlavor() async {
   await SealedTrace.init(
     SealedTraceConfig(
-      baseUrl: 'https://logs.example.com',
+      baseUrl: 'https://sealedtrace.duckdns.org',
       projectId: 'my-project',
       apiKey: const String.fromEnvironment('SEALED_TRACE_API_KEY'),
       publicKeyPem: projectPublicKeyPem,
@@ -57,7 +57,7 @@ void levels(Object e, StackTrace s) {
   SealedTrace.f('app', 'unrecoverable', error: e, stack: s);
 }
 
-/// Quick start step 4: required user and device context.
+/// Quick start step 5: required user and device context.
 void userAndDevice() {
   SealedTrace.setUser('user-42', name: 'Asha Rao');
   SealedTrace.setContext({
@@ -174,9 +174,10 @@ void main() {
     await SealedTrace.dispose();
     await apiOverview(
       const SealedTraceConfig(
-        baseUrl: 'https://logs.example.com',
+        baseUrl: 'https://sealedtrace.duckdns.org',
         projectId: 'my-project',
-        apiKey: 'sk_live_…',
+        apiKey:
+            'pk_live_…', // publishable: identifies the project, not a secret
         publicKeyPem: projectPublicKeyPem,
         appName: 'shop',
       ),

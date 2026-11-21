@@ -64,6 +64,7 @@ class _FailingBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) => Future.error(StateError('crypto unavailable'));
 }
 
@@ -83,7 +84,7 @@ void main() {
   group('the public key is validated at init', () {
     final bad = <String, String>{
       '1024-bit key': testPublicKey1024,
-      '3072-bit key': testPublicKey3072,
+      '2560-bit key': testPublicKey2560,
       'EC key': testPublicKeyEc,
       'private key': testPrivateKeyPkcs8,
       'garbage between PEM markers':
@@ -139,9 +140,8 @@ void main() {
       final envelope = envelopes.single;
       expect(envelope.projectId, 'proj-1');
       expect(envelope.eventCount, 2);
-      expect(envelope.seqMin, 1);
-      expect(envelope.seqMax, 2);
-      expect(envelope.topLevels, 'info,error');
+      expect(await sealedSeqs(envelope), [1, 2]);
+      expect(envelope.topLevels, '', reason: 'levels stay encrypted (L6)');
 
       final plaintext = await openEnvelope(envelope);
       final events = jsonDecode(plaintext) as List;
@@ -282,8 +282,14 @@ class _FlakyBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) {
     if (_shouldFail()) return Future.error(StateError('flaky'));
-    return super.aesGcmEncrypt(key: key, iv: iv, plaintext: plaintext);
+    return super.aesGcmEncrypt(
+      key: key,
+      iv: iv,
+      plaintext: plaintext,
+      aad: aad,
+    );
   }
 }

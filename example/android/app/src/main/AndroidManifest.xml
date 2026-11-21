@@ -2,10 +2,17 @@
     <!-- Needed in release builds too (sealed_trace README, Platform setup). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Backup is off (I4). sealed_trace's database holds only ciphertext, but
+         Android Auto Backup would copy it to the user's cloud account and restore
+         it onto other devices, along with anything else the app keeps. Turn
+         backup off, or exclude the files directory (sealed_trace.db*) with
+         android:dataExtractionRules / android:fullBackupContent, in your app. -->
     <application
         android:label="sealed_trace_example"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

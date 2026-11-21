@@ -69,13 +69,49 @@ class PageExitSaver {
     }
   }
 
-  /// Moves every spilled envelope to regular storage. Returns how many moved.
+  /// Most envelopes taken from the spill at one start. A real page exit
+  /// writes at most the queue's worth (5 000 events in batches of 25).
+  static const int maxRecovered = 200;
+
+  /// How far in the future a spilled `createdAt` may be (clock skew).
+  static const Duration maxFutureSkew = Duration(days: 1);
+
+  /// Moves spilled envelopes to regular storage. Returns how many moved.
+  ///
+  /// The spill is `localStorage`, which any script on the origin can write,
+  /// so an entry is dropped, and counted in `spillEntriesRejected`, if it
+  /// belongs to another project, is dated more than [maxFutureSkew] ahead,
+  /// or is beyond the newest [maxRecovered]. Entries that do not decode are
+  /// dropped by [EnvelopeSpill.readAll] (not counted).
   Future<int> recover() async {
-    var moved = 0;
+    final now = sealer.clock.now().toUtc();
+    final accepted = <SealedEnvelope>[];
     for (final envelope in spill.readAll()) {
+      final ours =
+          envelope.projectId == sealer.projectId &&
+          !envelope.createdAt.isAfter(now.add(maxFutureSkew));
+      if (ours) {
+        accepted.add(envelope);
+      } else {
+        _reject(envelope);
+      }
+    }
+    // readAll is oldest first; keep the newest maxRecovered.
+    final excess = accepted.length - maxRecovered;
+    if (excess > 0) {
+      accepted.take(excess).forEach(_reject);
+      accepted.removeRange(0, excess);
+    }
+    var moved = 0;
+    for (final envelope in accepted) {
       if (await _move(envelope)) moved++;
     }
     return moved;
+  }
+
+  void _reject(SealedEnvelope envelope) {
+    counters.spillEntriesRejected++;
+    spill.remove(envelope.batchId);
   }
 
   /// Removes everything from the spill (for `clearLocalLogs`).

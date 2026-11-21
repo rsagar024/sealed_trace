@@ -14,6 +14,9 @@ class DiagnosticSnapshot {
     this.envelopesDeadLettered = 0,
     this.purgedRows = 0,
     this.internalExceptions = 0,
+    this.configValuesAdjusted = 0,
+    this.spillEntriesRejected = 0,
+    this.contextEntriesDropped = 0,
   });
 
   /// Events that passed the gate and entered the pipeline.
@@ -45,6 +48,16 @@ class DiagnosticSnapshot {
 
   /// Exceptions swallowed internally and reported through `onException`.
   final int internalExceptions;
+
+  /// Configuration values that `init` clamped into their safe range.
+  final int configValuesAdjusted;
+
+  /// Web page-exit spill entries dropped at recovery: unreadable, for
+  /// another project, dated in the future, or over the recovery cap.
+  final int spillEntriesRejected;
+
+  /// `setContext` entries dropped because the context reached its limits.
+  final int contextEntriesDropped;
 }
 
 /// Mutable counters owned by the facade. Internal.
@@ -79,6 +92,15 @@ class DiagnosticCounters {
   /// See [DiagnosticSnapshot.internalExceptions].
   int internalExceptions = 0;
 
+  /// See [DiagnosticSnapshot.configValuesAdjusted].
+  int configValuesAdjusted = 0;
+
+  /// See [DiagnosticSnapshot.spillEntriesRejected].
+  int spillEntriesRejected = 0;
+
+  /// See [DiagnosticSnapshot.contextEntriesDropped].
+  int contextEntriesDropped = 0;
+
   /// Returns an immutable copy of the current values.
   DiagnosticSnapshot snapshot() => DiagnosticSnapshot(
     eventsAccepted: eventsAccepted,
@@ -91,5 +113,8 @@ class DiagnosticCounters {
     envelopesDeadLettered: envelopesDeadLettered,
     purgedRows: purgedRows,
     internalExceptions: internalExceptions,
+    configValuesAdjusted: configValuesAdjusted,
+    spillEntriesRejected: spillEntriesRejected,
+    contextEntriesDropped: contextEntriesDropped,
   );
 }

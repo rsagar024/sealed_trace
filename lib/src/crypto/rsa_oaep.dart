@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:meta/meta.dart';
 
 import 'public_key_parser.dart';
 
@@ -15,6 +16,12 @@ abstract final class RsaOaep {
 
   /// Bytes in the random seed.
   static const int seedLength = hashLength;
+
+  /// Called after every [encrypt] with the buffers it wiped (DB, both MGF1
+  /// masks, the masked seed and DB, and EM), so tests can check they are
+  /// zero. Each of them is enough to recover the wrapped message.
+  @visibleForTesting
+  static void Function(List<Uint8List> wiped)? debugOnWipe;
 
   /// The longest message a key with a modulus of [modulusBytes] can carry.
   static int maxMessageLength(int modulusBytes) =>
@@ -51,19 +58,31 @@ abstract final class RsaOaep {
     db[dbLength - message.length - 1] = 0x01;
     db.setRange(dbLength - message.length, dbLength, message);
 
-    final maskedDb = _xor(db, _mgf1(seed, dbLength));
-    final maskedSeed = _xor(seed, _mgf1(maskedDb, hashLength));
+    final dbMask = _mgf1(seed, dbLength);
+    final maskedDb = _xor(db, dbMask);
+    final seedMask = _mgf1(maskedDb, hashLength);
+    final maskedSeed = _xor(seed, seedMask);
 
     // EM = 0x00 || maskedSeed || maskedDB.
     final em = Uint8List(k)
       ..setRange(1, 1 + hashLength, maskedSeed)
       ..setRange(1 + hashLength, k, maskedDb);
 
-    final m = _toBigInt(em);
-    if (m >= key.modulus) {
-      throw ArgumentError('Encoded message is not smaller than the modulus');
+    try {
+      final m = _toBigInt(em);
+      if (m >= key.modulus) {
+        throw ArgumentError('Encoded message is not smaller than the modulus');
+      }
+      return _toBytes(m.modPow(key.exponent, key.modulus), k);
+    } finally {
+      // Best effort (L4). EM, DB and the masks each reveal the message; the
+      // BigInt copy of EM is immutable and cannot be wiped.
+      final wiped = [db, dbMask, maskedDb, seedMask, maskedSeed, em];
+      for (final b in wiped) {
+        b.fillRange(0, b.length, 0);
+      }
+      debugOnWipe?.call(wiped);
     }
-    return _toBytes(m.modPow(key.exponent, key.modulus), k);
   }
 
   /// MGF1 (RFC 8017, appendix B.2.1) with SHA-256.
@@ -78,6 +97,7 @@ abstract final class RsaOaep {
         ..[seed.length + 2] = (counter >>> 8) & 0xff
         ..[seed.length + 3] = counter & 0xff;
       final digest = sha256.convert(input).bytes;
+      input.fillRange(0, input.length, 0);
       for (var i = 0; i < digest.length && written < length; i++) {
         out[written++] = digest[i];
       }

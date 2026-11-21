@@ -182,7 +182,7 @@ void main() {
       expect(_engine().maskRecord(record()).ctx['userName'], 'Asha Rao');
     });
 
-    test('maskUserName replaces userName', () {
+    test('maskUserName: true masks userName', () {
       final engine = _engine(const MaskConfig(maskUserName: true));
       expect(engine.maskRecord(record()).ctx['userName'], '***');
     });
@@ -249,6 +249,91 @@ void main() {
       ]) {
         expect(text, isNot(contains(secret)), reason: secret);
       }
+    });
+  });
+
+  group('H2: credential headers', () {
+    test('the expanded denylist is masked', () {
+      const names = [
+        'Proxy-Authorization',
+        'X-Auth-Token',
+        'X-Access-Token',
+        'X-Refresh-Token',
+        'X-Id-Token',
+        'X-CSRF-Token',
+        'X-XSRF-TOKEN',
+        'X-Amz-Security-Token',
+        'X-Goog-Api-Key',
+        'X-Session-Token',
+      ];
+      final out = _engine().maskHeaders({
+        for (final n in names) n: 'secret-value',
+        'Accept': 'application/json',
+      });
+      for (final n in names) {
+        expect(out[n], '***', reason: n);
+      }
+      expect(out['Accept'], 'application/json');
+    });
+
+    test('a header named like a sensitive key is masked', () {
+      final out = _engine().maskHeaders({
+        'X-Custom-Token': 'abc',
+        'X-Client-Secret': 'def',
+        'Content-Type': 'application/json',
+      });
+      expect(out, {
+        'X-Custom-Token': '***',
+        'X-Client-Secret': '***',
+        'Content-Type': 'application/json',
+      });
+    });
+
+    test('the default denylist stays on with useDefaultKeys: false', () {
+      final out = _engine(
+        const MaskConfig(useDefaultKeys: false),
+      ).maskHeaders({'X-Auth-Token': 'a', 'X-Custom-Token': 'b'});
+      expect(out, {'X-Auth-Token': '***', 'X-Custom-Token': 'b'});
+    });
+
+    test('URL query keys use the same matching', () {
+      expect(
+        _engine().maskUrl('https://a.com/cb?accessToken=abc&idToken=d&x=1'),
+        'https://a.com/cb?accessToken=***&idToken=***&x=1',
+      );
+    });
+  });
+
+  group('M4: URL path segments (opt-in)', () {
+    test('off by default: path ids are kept', () {
+      expect(
+        _engine().maskUrl('https://a.com/reset/9f8a2c/confirm'),
+        'https://a.com/reset/9f8a2c/confirm',
+      );
+    });
+
+    test('maskUrlPathSegments masks every segment that is not a word', () {
+      final engine = _engine(const MaskConfig(maskUrlPathSegments: true));
+      expect(
+        engine.maskUrl('https://a.com/reset/9f8a2c/confirm?x=1'),
+        'https://a.com/reset/***/confirm?x=1',
+      );
+      expect(
+        engine.maskUrl('https://a.com/users/asha.rao/orders'),
+        'https://a.com/users/***/orders',
+      );
+      expect(
+        engine.maskUrl('https://a.com/api/v2/order-items/'),
+        'https://a.com/api/v2/order-items/',
+      );
+      expect(engine.maskUrl('/u/12345'), '/u/***');
+    });
+
+    test('the field takes part in copyWith and equality', () {
+      const on = MaskConfig(maskUrlPathSegments: true);
+      expect(const MaskConfig().maskUrlPathSegments, isFalse);
+      expect(const MaskConfig().copyWith(maskUrlPathSegments: true), on);
+      expect(on, isNot(const MaskConfig()));
     });
   });
 }

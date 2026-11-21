@@ -44,6 +44,7 @@ class FakeResponse {
     this.headers = const <String, List<String>>{},
     this.delay = Duration.zero,
     this.errorType,
+    this.isRedirect = false,
   });
 
   /// A 202 that accepts every id in [accepted].
@@ -67,6 +68,10 @@ class FakeResponse {
 
   /// When set, the adapter throws a [DioException] of this type instead.
   final DioExceptionType? errorType;
+
+  /// Marks the answer as coming from a followed redirect, the way the web
+  /// adapter reports one the browser followed.
+  final bool isRedirect;
 }
 
 /// A scripted stand-in for the network, plugged into Dio.
@@ -125,6 +130,7 @@ class FakeHttpClientAdapter implements HttpClientAdapter {
       response.body,
       response.status,
       headers: response.headers,
+      isRedirect: response.isRedirect,
     );
   }
 
