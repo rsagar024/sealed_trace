@@ -66,12 +66,69 @@ String encodeSpilledEnvelope(SealedEnvelope envelope) => jsonEncode({
   'payloadSize': envelope.payloadSize,
 });
 
+/// Longest spilled entry accepted, in characters: one request's worth.
+const int maxSpilledEntryChars = 3 * 1024 * 1024;
+
+final RegExp _spillBatchId = RegExp(r'^[A-Za-z0-9_\-]{1,64}$');
+
+const Set<String> _levelNames = <String>{
+  'verbose',
+  'debug',
+  'info',
+  'warning',
+  'error',
+  'fatal',
+};
+
 /// Decodes what [encodeSpilledEnvelope] produced. Throws on anything else.
+///
+/// The spill lives in `localStorage`, which any script on the origin can
+/// write, so every field is checked: the format version and algorithm, the
+/// exact sizes of the key, IV and tag, a ciphertext as long as its declared
+/// plaintext, and consistent index columns. This rejects junk and truncated
+/// entries; it cannot reject a well-formed envelope built with the public key
+/// (see the README).
 SealedEnvelope decodeSpilledEnvelope(String text) {
+  if (text.length > maxSpilledEntryChars) {
+    throw const FormatException('Spilled entry too large');
+  }
   final m = jsonDecode(text) as Map<String, dynamic>;
-  if (m['v'] != envelopeVersion || m['alg'] != envelopeAlgorithm) {
+  final version = m['v'];
+  final kid = m['kid'];
+  if (!((version == envelopeVersion && kid is String) ||
+      (version == legacyEnvelopeVersion && kid == null))) {
     throw const FormatException('Unknown spilled envelope format');
   }
+  final envelope = _decodeFields(m);
+  _checkSpilled(envelope);
+  // The algorithm must match the wrapped key's size (and be RSA-2048 for v1).
+  if (m['alg'] != envelope.algorithm ||
+      (kid == null && envelope.algorithm != envelopeAlgorithm)) {
+    throw const FormatException('Unknown spilled envelope format');
+  }
+  return envelope;
+}
+
+void _checkSpilled(SealedEnvelope e) {
+  if (!_spillBatchId.hasMatch(e.batchId) ||
+      e.projectId.isEmpty ||
+      e.projectId.length > 256 ||
+      !supportedRsaModulusBits.contains(e.wrappedKey.length * 8) ||
+      (e.kid != null && !_spillBatchId.hasMatch(e.kid!)) ||
+      e.iv.length != 12 ||
+      e.tag.length != 16 ||
+      e.eventCount < 1 ||
+      e.eventCount > 100000 ||
+      e.payloadSize != e.ciphertext.length ||
+      e.seqMin > e.seqMax ||
+      e.minTs > e.maxTs ||
+      (e.topLevels.isNotEmpty &&
+          !e.topLevels.split(',').every(_levelNames.contains))) {
+    throw const FormatException('Inconsistent spilled envelope');
+  }
+}
+
+SealedEnvelope _decodeFields(Map<String, dynamic> m) {
   return SealedEnvelope(
     batchId: m['batchId'] as String,
     projectId: m['projectId'] as String,
@@ -87,6 +144,7 @@ SealedEnvelope decodeSpilledEnvelope(String text) {
     maxTs: m['maxTs'] as int,
     topLevels: m['topLevels'] as String,
     payloadSize: m['payloadSize'] as int,
+    kid: m['kid'] as String?,
   );
 }
 
@@ -99,7 +157,12 @@ List<SealedEnvelope> sortedSpill(
   final out = <SealedEnvelope>[];
   for (final entry in entries.entries.toList()) {
     try {
-      out.add(decodeSpilledEnvelope(entry.value));
+      final envelope = decodeSpilledEnvelope(entry.value);
+      // An entry stored under another batch's key is not ours.
+      if (envelope.batchId != entry.key) {
+        throw const FormatException('Spill key does not match the batch id');
+      }
+      out.add(envelope);
     } catch (_) {
       drop(entry.key);
     }

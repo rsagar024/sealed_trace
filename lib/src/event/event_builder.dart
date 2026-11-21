@@ -108,8 +108,10 @@ class EventBuilder {
     builtCount++;
     final at = timestamp ?? clock.now();
     final ctx = <String, dynamic>{...extraContext};
-    // Owned by setUser: a value from setContext is never sent.
-    ctx.remove(userDisplayNameKey);
+    // Owned by setUser: a value from setContext is never sent (L8).
+    ctx
+      ..remove(userDisplayNameKey)
+      ..remove('userName');
     if (userName != null) ctx['userName'] = userName;
     if (userDisplayName != null) ctx[userDisplayNameKey] = userDisplayName;
     ctx.addAll(_core);

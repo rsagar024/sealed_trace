@@ -6,6 +6,7 @@ import 'package:sealed_trace/sealed_trace.dart';
 import 'package:sealed_trace/src/storage/storage_adapter.dart';
 import 'package:sealed_trace/src/transport/ingest_response.dart';
 import 'package:sealed_trace/src/upload/triggers.dart';
+import 'package:sealed_trace/src/upload/upload_scheduler.dart';
 
 import '../helpers/envelopes.dart';
 import '../helpers/fake_connectivity.dart';
@@ -242,13 +243,103 @@ void main() {
       );
     });
 
-    test('a retry is not scheduled once paused', () {
+    test('no retry during the pause; one probe when it ends (L7)', () {
       fakeAsync((async) {
         final rig = SchedulerRig();
         awaitFake(async, rig.add('a'));
         rig.client.enqueueOutcome(const IngestUnauthorized(403));
         awaitFake(async, rig.scheduler.request(UploadTrigger.manual));
-        async.elapse(const Duration(hours: 1));
+        async.elapse(const Duration(minutes: 59));
+        expect(rig.client.calls, hasLength(1), reason: 'still paused');
+        async.elapse(const Duration(minutes: 2));
+        expect(rig.client.calls, hasLength(2), reason: 'probed after 1 h');
+        expect(rig.scheduler.isPaused, isFalse);
+        expect(awaitFake(async, rig.ids()), isEmpty, reason: 'then accepted');
+      });
+    });
+  });
+
+  group('L7: a 401/403 pause ends by itself', () {
+    test('pause lengths: 1 h from the server, 5 min otherwise, doubling '
+        'to 12 h', () {
+      Duration p(int n, bool c) => UploadScheduler.authPause(n, confirmed: c);
+      expect(p(1, true), const Duration(hours: 1));
+      expect(p(2, true), const Duration(hours: 2));
+      expect(p(4, true), const Duration(hours: 8));
+      expect(p(5, true), const Duration(hours: 12));
+      expect(p(50, true), const Duration(hours: 12));
+      expect(p(1, false), const Duration(minutes: 5));
+      expect(p(3, false), const Duration(minutes: 20));
+      expect(p(20, false), const Duration(hours: 12));
+    });
+
+    test('a 401 that is not the ingest server\'s is probed after 5 min', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        rig.client.enqueueOutcome(
+          const IngestUnauthorized(401, fromIngestServer: false),
+        );
+        awaitFake(async, rig.scheduler.request(UploadTrigger.manual));
+        expect(rig.errors.single.toString(), contains('captive portal'));
+        async.elapse(const Duration(minutes: 4));
+        expect(rig.client.calls, hasLength(1));
+        async.elapse(const Duration(minutes: 2));
+        expect(rig.client.calls, hasLength(2));
+      });
+    });
+
+    test('repeated 401s double the pause and burn no attempts', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        final times = <Duration>[];
+        for (var i = 0; i < 3; i++) {
+          rig.client.enqueue((_) {
+            times.add(async.elapsed);
+            return const IngestUnauthorized(401);
+          });
+        }
+        unawaited(rig.scheduler.request(UploadTrigger.manual));
+        async.elapse(const Duration(hours: 8));
+        expect(times, [
+          Duration.zero,
+          const Duration(hours: 1),
+          const Duration(hours: 3),
+        ]);
+        expect(rig.client.calls, hasLength(4), reason: 'then accepted at 7 h');
+        expect(rig.errors, hasLength(1), reason: 'one report per episode');
+      });
+    });
+
+    test('after recovery, a new 401 starts a fresh, reported episode', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        rig.client.enqueueOutcome(const IngestUnauthorized(401));
+        awaitFake(async, rig.scheduler.request(UploadTrigger.manual));
+        async.elapse(const Duration(hours: 1, minutes: 1)); // probe accepted
+        expect(awaitFake(async, rig.ids()), isEmpty);
+
+        awaitFake(async, rig.add('b'));
+        rig.client.enqueueOutcome(const IngestUnauthorized(401));
+        awaitFake(async, rig.scheduler.request(UploadTrigger.manual));
+        expect(rig.errors, hasLength(2), reason: 'reported again');
+        async.elapse(const Duration(minutes: 59));
+        expect(rig.scheduler.isPaused, isTrue, reason: 'back to 1 h');
+        async.elapse(const Duration(minutes: 2));
+        expect(rig.scheduler.isPaused, isFalse);
+      });
+    });
+
+    test('dispose cancels the resume timer', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        rig.client.enqueueOutcome(const IngestUnauthorized(401));
+        awaitFake(async, rig.scheduler.request(UploadTrigger.manual));
+        awaitFake(async, rig.scheduler.dispose());
+        async.elapse(const Duration(hours: 2));
         expect(rig.client.calls, hasLength(1));
       });
     });
@@ -543,6 +634,46 @@ void main() {
       connectivity.setOnline(true);
       await pumpEventQueue();
       expect(rig.client.calls, isEmpty);
+    });
+  });
+
+  group('M2: attestation unavailable', () {
+    test('burns no attempt and retries after a backoff delay', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        rig.client.enqueueOutcome(const IngestAttestationUnavailable());
+
+        final result = awaitFake(
+          async,
+          rig.scheduler.request(UploadTrigger.manual),
+        );
+        expect(result.outcome, UploadOutcome.failed);
+        expect(awaitFake(async, rig.index())['a']!.attempts, 0);
+        expect(rig.counters.uploadFailures, 1);
+
+        async.elapse(const Duration(seconds: 6));
+        expect(rig.client.calls, hasLength(2), reason: 'retried');
+        expect(awaitFake(async, rig.ids()), isEmpty, reason: 'then accepted');
+      });
+    });
+
+    test('never dead-letters, however often it repeats', () {
+      fakeAsync((async) {
+        final rig = SchedulerRig();
+        awaitFake(async, rig.add('a'));
+        for (var i = 0; i < 12; i++) {
+          rig.client.enqueueOutcome(const IngestAttestationUnavailable());
+        }
+        unawaited(rig.scheduler.request(UploadTrigger.manual));
+        async.elapse(const Duration(hours: 3));
+        final index = awaitFake(async, rig.index());
+        expect(index.containsKey('a') ? index['a']!.attempts : 0, 0);
+        expect(
+          index.values.where((r) => r.uploadState == uploadStateDeadLetter),
+          isEmpty,
+        );
+      });
     });
   });
 }

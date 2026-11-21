@@ -56,6 +56,7 @@ class _BrokenBackend extends DefaultCryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) => throw StateError('aes failed');
 }
 
@@ -166,8 +167,16 @@ void main() {
 
   test('recover moves spilled envelopes oldest first', () async {
     final rig = _Rig();
-    final newer = makeEnvelope(id: 'b', createdAt: DateTime.utc(2026, 1, 2));
-    final older = makeEnvelope(id: 'a', createdAt: DateTime.utc(2026, 1, 1));
+    final newer = makeEnvelope(
+      id: 'b',
+      createdAt: DateTime.utc(2026, 1, 2),
+      projectId: 'p',
+    );
+    final older = makeEnvelope(
+      id: 'a',
+      createdAt: DateTime.utc(2026, 1, 1),
+      projectId: 'p',
+    );
     rig.spill.write(newer);
     rig.spill.write(older);
     expect(await rig.saver.recover(), 2);

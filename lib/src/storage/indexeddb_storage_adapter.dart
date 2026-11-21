@@ -262,6 +262,7 @@ class IndexedDbStorageAdapter implements StorageAdapter {
       'attempts': row.attempts.toJS,
       'lastAttemptAt': row.lastAttemptAt?.toJS,
       'uploadedAt': row.uploadedAt?.toJS,
+      'kid': e.kid?.toJS,
     });
   }
 
@@ -270,6 +271,11 @@ class IndexedDbStorageAdapter implements StorageAdapter {
 
   static String _string(JSObject object, String name) =>
       object.getProperty<JSString>(name.toJS).toDart;
+
+  /// A string property that may be absent: records written before I3 have
+  /// no `kid`.
+  static String? _optionalString(JSObject object, String name) =>
+      object.getProperty<JSString?>(name.toJS)?.toDart;
 
   static Uint8List _bytes(JSObject object, String name) =>
       Uint8List.fromList(object.getProperty<JSUint8Array>(name.toJS).toDart);
@@ -304,6 +310,7 @@ class IndexedDbStorageAdapter implements StorageAdapter {
       maxTs: _int(index, 'maxTs')!,
       topLevels: _string(index, 'topLevels'),
       payloadSize: _int(index, 'payloadSize')!,
+      kid: _optionalString(index, 'kid'),
     ),
     uploadState: _int(index, 'uploadState')!,
     attempts: _int(index, 'attempts')!,

@@ -20,7 +20,7 @@ class AesGcmResult {
 /// Input for one AES-256-GCM encryption. Sendable across isolates.
 class AesGcmJob {
   /// Creates a job.
-  const AesGcmJob(this.key, this.iv, this.plaintext);
+  const AesGcmJob(this.key, this.iv, this.plaintext, [this.aad]);
 
   /// 32-byte key.
   final Uint8List key;
@@ -30,9 +30,12 @@ class AesGcmJob {
 
   /// Data to encrypt.
   final Uint8List plaintext;
+
+  /// Additional authenticated data: authenticated by the tag, not encrypted.
+  final Uint8List? aad;
 }
 
-/// Encrypts [job] with AES-256-GCM and no additional authenticated data.
+/// Encrypts [job] with AES-256-GCM, authenticating its `aad` when given.
 ///
 /// A top-level function so it can run in a background isolate.
 Future<AesGcmResult> runAesGcm(AesGcmJob job) async {
@@ -40,8 +43,22 @@ Future<AesGcmResult> runAesGcm(AesGcmJob job) async {
     key: job.key,
     iv: job.iv,
     plaintext: job.plaintext,
+    aad: job.aad,
   );
   return AesGcmResult(ciphertext, tag);
+}
+
+/// Like [runAesGcm], for a job that is a private copy, such as the one a
+/// background isolate receives: encrypts, then overwrites the job's key and
+/// plaintext with zeros. Never use it on a caller's own buffers, because the
+/// sealer still needs its key to wrap it.
+Future<AesGcmResult> runAesGcmAndWipe(AesGcmJob job) async {
+  try {
+    return await runAesGcm(job);
+  } finally {
+    job.key.fillRange(0, job.key.length, 0);
+    job.plaintext.fillRange(0, job.plaintext.length, 0);
+  }
 }
 
 /// The primitives the envelope sealer needs. Replaceable in tests.
@@ -49,11 +66,12 @@ abstract interface class CryptoBackend {
   /// [length] cryptographically secure random bytes.
   Uint8List randomBytes(int length);
 
-  /// AES-256-GCM encryption with no additional authenticated data.
+  /// AES-256-GCM encryption of [plaintext], authenticating [aad] as well.
   Future<AesGcmResult> aesGcmEncrypt({
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   });
 
   /// AES-256-GCM on the calling thread, for the page-exit path where nothing
@@ -62,6 +80,7 @@ abstract interface class CryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   });
 
   /// RSA-OAEP (SHA-256, MGF1-SHA-256, empty label) encryption of [data].
@@ -106,8 +125,9 @@ class DefaultCryptoBackend implements CryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) {
-    final job = AesGcmJob(key, iv, plaintext);
+    final job = AesGcmJob(key, iv, plaintext, aad);
     final offload = this.offload;
     if (offload != null && plaintext.length > offloadThresholdBytes) {
       return offload(job);
@@ -120,16 +140,24 @@ class DefaultCryptoBackend implements CryptoBackend {
     required Uint8List key,
     required Uint8List iv,
     required Uint8List plaintext,
+    required Uint8List aad,
   }) {
     final (ciphertext, tag) = AesGcm256.encrypt(
       key: key,
       iv: iv,
       plaintext: plaintext,
+      aad: aad,
     );
     return AesGcmResult(ciphertext, tag);
   }
 
   @override
-  Uint8List rsaOaepWrap(RsaPublicKeyData key, Uint8List data) =>
-      RsaOaep.encrypt(key, data, randomBytes(RsaOaep.seedLength));
+  Uint8List rsaOaepWrap(RsaPublicKeyData key, Uint8List data) {
+    final seed = randomBytes(RsaOaep.seedLength);
+    try {
+      return RsaOaep.encrypt(key, data, seed);
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
+  }
 }

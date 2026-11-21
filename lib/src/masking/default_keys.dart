@@ -1,4 +1,7 @@
-/// Keys whose values are always masked, matched exactly and case-insensitively.
+/// Keys whose values are always masked.
+///
+/// Matching ignores case and the separators `_`, `-`, `.` and spaces, so
+/// `access_token`, `accessToken` and `Access-Token` are the same key.
 const List<String> defaultSensitiveKeys = <String>[
   'password',
   'pass',
@@ -22,12 +25,66 @@ const List<String> defaultSensitiveKeys = <String>[
   'dob',
   'ssn',
   'cvv',
+  'username',
+  'otp',
+  'pin',
+  'mpin',
+  'cvc',
+  'session',
+  'sessionId',
+  'sid',
+  'cardNumber',
+  'ccNumber',
+  'client_secret',
+  'authCode',
+  'iban',
+  'passport',
+  'passportNumber',
+  'passportNo',
+  'aadhaar',
+  'aadhar',
+  'aadhaarNumber',
+  'panNumber',
+  'panCard',
+  'nationalId',
+  'taxId',
+  'ip',
+  'ipAddress',
+  'clientIp',
+];
+
+/// Fragments that make a key sensitive wherever they appear in it, after the
+/// same normalization as [defaultSensitiveKeys]. `idToken`, `x-csrf-token`,
+/// `clientSecretValue` and `oldPassword` all match. Keys that end with `auth`
+/// (`oauth`, `basicAuth`) are also sensitive; `author` and `authority` are not.
+const List<String> defaultSensitiveKeyFragments = <String>[
+  'token',
+  'secret',
+  'password',
+  'passwd',
+  'passphrase',
+  'credential',
+  'apikey',
+  'privatekey',
+  'authorization',
+  'cookie',
+  'jwt',
 ];
 
 /// Header names whose values are always masked, lower-cased.
 const List<String> defaultHeaderDenylist = <String>[
   'authorization',
+  'proxy-authorization',
   'cookie',
   'set-cookie',
   'x-api-key',
+  'x-auth-token',
+  'x-access-token',
+  'x-refresh-token',
+  'x-id-token',
+  'x-csrf-token',
+  'x-xsrf-token',
+  'x-amz-security-token',
+  'x-goog-api-key',
+  'x-session-token',
 ];

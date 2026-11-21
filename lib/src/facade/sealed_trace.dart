@@ -1,15 +1,20 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show debugPrint, kReleaseMode;
 import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/config_validator.dart';
 import '../config/sealed_trace_config.dart';
+import '../crypto/aes_gcm_platform.dart';
+import '../crypto/app_aes_gcm.dart';
 import '../crypto/crypto_backend.dart';
 import '../crypto/envelope_sealer.dart';
+import '../crypto/known_test_keys.dart';
 import '../crypto/public_key_parser.dart';
 import '../diagnostics/diagnostic_counters.dart';
+import '../event/context_limits.dart';
+import '../masking/pseudonym.dart';
 import '../diagnostics/internal_logger.dart';
 import '../event/event_builder.dart';
 import '../event/event_pipeline.dart';
@@ -85,6 +90,24 @@ abstract final class SealedTrace {
   /// A snapshot of the SDK's internal counters. Never contains log content.
   static DiagnosticSnapshot get diagnostics => _counters.snapshot();
 
+  /// Reports values that `init` clamped: counted in
+  /// [DiagnosticSnapshot.configValuesAdjusted] and printed, through the
+  /// internal logger when it is on and otherwise in debug builds only. They
+  /// are corrections, not errors, so they do not reach [onException].
+  static void _reportAdjustments(List<String> adjusted, bool verbose) {
+    if (adjusted.isEmpty) return;
+    _counters.configValuesAdjusted += adjusted.length;
+    final message = 'config values adjusted: ${adjusted.join('; ')}';
+    if (verbose) {
+      _logger.log(message);
+    } else {
+      assert(() {
+        debugPrint('[sealed_trace] $message');
+        return true;
+      }());
+    }
+  }
+
   /// Initializes the SDK.
   ///
   /// Idempotent: later calls return the first call's future and are otherwise
@@ -144,18 +167,23 @@ abstract final class SealedTrace {
 
   /// Sets the current user. Pass a null [id] on logout.
   ///
-  /// [name] is trimmed and cut to 256 characters, then sent as given in
-  /// `ctx.userName`, so the console shows it in the Users tab, the log list
-  /// and log detail. Set `MaskConfig.maskUserName` to send `***` instead.
-  /// Unless `SealedTraceConfig.sendUserDisplayName` is false it is also sent,
-  /// never masked, as `ctx.userDisplayName` for the Users tab. Both travel
-  /// only inside the sealed envelope. `setUser(null)`, or a call without
+  /// [id] is sent unmasked as `userId` (unless
+  /// `MaskConfig.pseudonymizeUserId` is true). [name] is trimmed, cut to 256
+  /// characters and sent unmasked as `ctx.userName` (unless
+  /// `MaskConfig.maskUserName` is true). These are the only unmasked copies:
+  /// the same name in a message, metadata or `setContext` is still masked.
+  /// `ctx.userDisplayName` is sent only when
+  /// `SealedTraceConfig.sendUserDisplayName` is true. All travel only inside
+  /// the sealed envelope. `setUser(null)`, or a call without
   /// [name], clears both. No-op before [init].
   static void setUser(String? id, {String? name}) {
     final runtime = _runtime;
     if (runtime == null) return;
     try {
-      runtime.userId = id;
+      runtime.userId =
+          id != null && runtime.config.maskConfig.pseudonymizeUserId
+          ? Pseudonym.of(id, projectId: runtime.config.projectId)
+          : id;
       final userName = normalizeUserDisplayName(name);
       runtime.userName = userName;
       runtime.userDisplayName = runtime.config.sendUserDisplayName
@@ -166,20 +194,65 @@ abstract final class SealedTrace {
     }
   }
 
+  /// A stable pseudonym for [value] in this project: `p_` plus 22
+  /// characters, the first 128 bits of an HMAC-SHA256 keyed by the project
+  /// id. Use it for identifiers that should group events without revealing
+  /// the raw value, such as a device id in `setContext` (L12).
+  ///
+  /// It is pseudonymous, not anonymous: the project id ships in the app, so
+  /// someone who has it can test guesses. Use it for high-entropy ids, not
+  /// for emails or phone numbers. Returns null before [init].
+  static String? pseudonym(String value) {
+    final runtime = _runtime;
+    if (runtime == null) return null;
+    try {
+      return Pseudonym.of(value, projectId: runtime.config.projectId);
+    } catch (error, stack) {
+      _report(error, stack);
+      return null;
+    }
+  }
+
   /// Merges [ctx] into the context attached to every later event.
+  ///
+  /// The merged context is bounded (L8): at most 100 keys and 16 KB of
+  /// JSON. A key that would go past either limit is dropped, the existing
+  /// value is kept, the drop is counted in
+  /// [DiagnosticSnapshot.contextEntriesDropped] and the first one in a
+  /// session is reported through [onException]. The SDK's own keys (the
+  /// device context: `appVersion`, `buildNumber`, `platform`, `os`, `locale`,
+  /// `env`, `network`; and `userName` and `userDisplayName`) are ignored; use
+  /// [setUser] for the user's name.
   ///
   /// No-op before [init].
   static void setContext(Map<String, dynamic> ctx) {
     final runtime = _runtime;
     if (runtime == null) return;
     try {
-      runtime.context.addAll(MetadataNormalizer.normalize(ctx));
+      final dropped = ContextLimits.merge(
+        runtime.context,
+        MetadataNormalizer.normalize(ctx),
+      );
+      if (dropped > 0) {
+        _counters.contextEntriesDropped += dropped;
+        if (!runtime.contextLimitReported) {
+          runtime.contextLimitReported = true;
+          _report(
+            StateError(
+              'setContext dropped $dropped entries: the context is limited '
+              'to ${ContextLimits.maxEntries} keys and '
+              '${ContextLimits.maxChars} JSON characters',
+            ),
+            StackTrace.current,
+          );
+        }
+      }
     } catch (error, stack) {
       _report(error, stack);
     }
   }
 
-  /// Adds sensitive [keys] to mask, matched case-insensitively.
+  /// Adds sensitive [keys] to mask, matched ignoring case and `_`, `-`, `.`.
   ///
   /// No-op before [init].
   static void addMaskKeys(List<String> keys) {
@@ -194,21 +267,31 @@ abstract final class SealedTrace {
 
   /// Adds a [pattern] whose matches are masked in every string value.
   ///
+  /// The pattern runs synchronously on every logged string, so it must not
+  /// backtrack catastrophically. A pattern with nested repetition (`(a+)+`),
+  /// repeated alternation (`(a|b)*`) or a backreference, or one that matches
+  /// the empty string, is ignored and reported through [onException]. Prefer
+  /// a literal prefix and bounded quantifiers, such as `\bORD-\d{6}\b`.
+  ///
   /// No-op before [init].
   static void addMaskPattern(RegExp pattern) {
     final runtime = _runtime;
     if (runtime == null) return;
     try {
       final masking = runtime.pipeline?.masking;
-      if (masking != null && !masking.addPattern(pattern)) {
+      if (masking == null) return;
+      final problem = MaskingEngine.patternProblem(pattern);
+      if (problem != null) {
         _report(
           ArgumentError.value(
             pattern.pattern,
             'pattern',
-            'Mask pattern ignored: it matches the empty string',
+            'Mask pattern ignored: $problem',
           ),
           StackTrace.current,
         );
+      } else {
+        masking.addPattern(pattern);
       }
     } catch (error, stack) {
       _report(error, stack);
@@ -232,7 +315,9 @@ abstract final class SealedTrace {
     return uploader.request(UploadTrigger.manual);
   }
 
-  /// Deletes all locally stored logs, for example on logout.
+  /// Deletes all locally stored logs, for example on logout: the queue, the
+  /// web spill, every stored envelope, and any copies of a corrupt database
+  /// that were set aside.
   ///
   /// Never completes with an error.
   static Future<void> clearLocalLogs() async {
@@ -275,8 +360,10 @@ abstract final class SealedTrace {
         );
         return;
       }
-      final clamped = ConfigValidator.clamp(config);
+      final normalized = ConfigValidator.normalize(config);
+      final clamped = normalized.config;
       _logger = InternalLogger(clamped.verboseInternalLogs);
+      _reportAdjustments(normalized.adjusted, clamped.verboseInternalLogs);
 
       EventPipeline? pipeline;
       PageExitSaver? exitSaver;
@@ -292,6 +379,18 @@ abstract final class SealedTrace {
           return;
         }
         final overrides = debugOverrides;
+        // I2: never seal to the repository's test key in a release build.
+        final testKey = testKeyProblem(
+          publicKey,
+          releaseMode: overrides?.releaseMode ?? kReleaseMode,
+        );
+        if (testKey != null) {
+          _report(
+            StateError('Invalid publicKeyPem: $testKey'),
+            StackTrace.current,
+          );
+          return;
+        }
         final counters = _counters;
         final adapter =
             overrides?.storage ??
@@ -319,7 +418,8 @@ abstract final class SealedTrace {
             onPurged: (n) => counters.purgedRows += n,
             onDeadLettered: (n) => counters.envelopesDeadLettered += n,
           ),
-          purgeInterval: clamped.retentionConfig.purgeInterval,
+          purgeInterval:
+              overrides?.purgeInterval ?? clamped.retentionConfig.purgeInterval,
           clock: overrides?.clock ?? const SystemClock(),
           counters: counters,
           onError: _report,
@@ -340,12 +440,32 @@ abstract final class SealedTrace {
           clock: overrides?.clock ?? const SystemClock(),
           newId: newId,
         );
+        var offload = platformAesGcmOffload();
+        var offloadThreshold = platformOffloadThresholdBytes;
+        final appCipher = clamped.aesGcmEncryptor;
+        if (appCipher != null && overrides?.cryptoBackend == null) {
+          if (await selfTestAesGcm(appCipher)) {
+            offload = appAesGcmOffload(appCipher, onError: _report);
+            offloadThreshold = 0;
+          } else {
+            _report(
+              StateError(
+                'aesGcmEncryptor failed its self-test; '
+                'using the built-in AES-GCM',
+              ),
+              StackTrace.current,
+            );
+          }
+        }
         final sealer = EnvelopeSealer(
           publicKey: publicKey,
           projectId: clamped.projectId,
           backend:
               overrides?.cryptoBackend ??
-              DefaultCryptoBackend(offload: (job) => compute(runAesGcm, job)),
+              DefaultCryptoBackend(
+                offload: offload,
+                offloadThresholdBytes: offloadThreshold,
+              ),
           clock: overrides?.clock ?? const SystemClock(),
           newId: newId,
         );
@@ -398,6 +518,11 @@ abstract final class SealedTrace {
                       overrides?.httpClientAdapter ??
                       clamped.uploadConfig.httpClientAdapter,
                   clock: overrides?.clock ?? const SystemClock(),
+                  attestationTokenProvider:
+                      clamped.uploadConfig.attestationTokenProvider,
+                  pinnedSpkiSha256: overrides?.httpClientAdapter == null
+                      ? clamped.uploadConfig.pinnedSpkiSha256
+                      : const [],
                 ),
             config: clamped.uploadConfig,
             counters: counters,

@@ -219,4 +219,49 @@ void main() {
       expect(q.hasPendingTimer, isFalse);
     });
   });
+
+  group('M5: total-byte cap', () {
+    test('oldest records are dropped once the bytes exceed the cap', () {
+      var drops = 0;
+      final queue = WriteBehindQueue(
+        sink: (batch) async {},
+        onError: (_, _) {},
+        onDropped: () => drops++,
+        maxBatchEvents: 1000,
+        maxBatchBytes: 1 << 30,
+        maxQueuedBytes: 10000,
+      );
+      addTearDown(queue.discardPending);
+      for (var i = 0; i < 20; i++) {
+        queue.add(makeRecord(seq: i, message: 'x' * 2000));
+      }
+      expect(drops, greaterThan(0));
+      final kept = queue.takeBatches().expand((b) => b).toList();
+      final keptBytes = kept.fold<int>(0, (n, r) => n + r.approxBytes);
+      expect(keptBytes, lessThanOrEqualTo(10000));
+      expect(kept.last.seq, 19, reason: 'the newest is kept');
+      expect(kept.length + drops, 20);
+    });
+
+    test('a single record larger than the cap is still kept', () {
+      final queue = WriteBehindQueue(
+        sink: (batch) async {},
+        onError: (_, _) {},
+        maxBatchEvents: 1000,
+        maxBatchBytes: 1 << 30,
+        maxQueuedBytes: 1000,
+      );
+      addTearDown(queue.discardPending);
+      queue.add(makeRecord(seq: 1, message: 'x' * 5000));
+      expect(queue.length, 1);
+    });
+
+    test('the default cap is 8 MiB', () {
+      final queue = WriteBehindQueue(
+        sink: (batch) async {},
+        onError: (_, _) {},
+      );
+      expect(queue.maxQueuedBytes, 8 * 1024 * 1024);
+    });
+  });
 }

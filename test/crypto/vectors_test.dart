@@ -6,7 +6,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sealed_trace/src/crypto/envelope_sealer.dart';
 import 'package:sealed_trace/src/crypto/crypto_backend.dart';
+import 'package:sealed_trace/src/crypto/key_id.dart';
+import 'package:sealed_trace/src/crypto/public_key_parser.dart';
 
 import '../helpers/envelope_opener.dart';
 import '../helpers/test_keys.dart';
@@ -25,6 +28,8 @@ void main() {
     expect(keys['publicKeySpki'], testPublicKeySpki);
     expect(keys['publicKeyPkcs1'], testPublicKeyPkcs1);
     expect(keys['privateKeyPkcs8'], testPrivateKeyPkcs8);
+    expect(keys['publicKey3072Spki'], testPublicKey3072);
+    expect(keys['privateKey3072Pkcs8'], testPrivateKey3072Pkcs8);
   });
 
   test('the file covers the documented cases', () {
@@ -39,6 +44,8 @@ void main() {
         'multi_event_mixed_levels',
         'unicode_event',
         'full_batch_25_events',
+        'rsa_3072_key',
+        'legacy_v1_no_aad',
       ]),
     );
   });
@@ -64,15 +71,49 @@ void main() {
       test(c['name'] as String, () async {
         final wire = (c['envelope'] as Map).cast<String, dynamic>();
 
-        expect(wire['v'], 1);
-        expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
+        final legacy = c['name'] == 'legacy_v1_no_aad';
+        final rsa3072 = c['name'] == 'rsa_3072_key';
+        expect(wire['v'], legacy ? 1 : 3);
+        expect(
+          wire['alg'],
+          rsa3072
+              ? 'RSA-OAEP-3072-SHA256+AES-256-GCM'
+              : 'RSA-OAEP-2048-SHA256+AES-256-GCM',
+        );
+        // I3: the kid is the key's own identifier (absent for v2).
+        expect(
+          wire['kid'],
+          legacy
+              ? isNull
+              : keyId(
+                  PublicKeyParser.parse(
+                    rsa3072 ? testPublicKey3072 : testPublicKeySpki,
+                  ),
+                ),
+        );
+        expect(utf8.decode(wireAad(wire)), c['aadUtf8']);
         expect(_b64(wire['iv'] as String), hasLength(12));
         expect(_b64(wire['tag'] as String), hasLength(16));
-        expect(_b64(wire['wrappedKey'] as String), hasLength(256));
+        expect(
+          _b64(wire['wrappedKey'] as String),
+          hasLength(rsa3072 ? 384 : 256),
+        );
 
         final key = unwrapKey(_b64(wire['wrappedKey'] as String));
         expect(base64.encode(key), c['aesKeyBase64']);
         expect(await openWire(wire), c['plaintextJson']);
+        // L6: the ciphertext is the padded plaintext's length.
+        expect(
+          base64.decode(wire['ciphertext'] as String).length,
+          c['paddedLength'],
+        );
+        expect(
+          legacy
+              // 1.0.0 did not pad (L6 came later).
+              ? utf8.encode(c['plaintextJson'] as String).length
+              : padmeLength(utf8.encode(c['plaintextJson'] as String).length),
+          c['paddedLength'],
+        );
 
         final events = jsonDecode(c['plaintextJson'] as String) as List;
         expect(events, hasLength(wire['eventCount'] as int));

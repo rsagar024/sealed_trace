@@ -1,6 +1,7 @@
 import 'package:web/web.dart' as web;
 
 import 'platform_info.dart';
+import 'user_agent.dart';
 
 /// Reads platform facts in the browser.
 PlatformInfo readPlatformInfo() {
@@ -9,10 +10,9 @@ PlatformInfo readPlatformInfo() {
   try {
     final language = web.window.navigator.language;
     if (language.isNotEmpty) locale = language.replaceAll('-', '_');
-    final agent = web.window.navigator.userAgent;
-    if (agent.isNotEmpty) {
-      os = agent.length > 120 ? agent.substring(0, 120) : agent;
-    }
+    // Only the browser, its major version and the OS, never the full user
+    // agent (L12).
+    os = coarseUserAgent(web.window.navigator.userAgent);
   } catch (_) {
     // Keep the defaults.
   }

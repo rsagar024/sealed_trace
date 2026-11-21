@@ -22,6 +22,7 @@ class WriteBehindQueue {
     this.maxBatchEvents = 25,
     this.maxBatchBytes = 64 * 1024,
     this.maxQueued = 5000,
+    this.maxQueuedBytes = 8 * 1024 * 1024,
   }) : _sink = sink,
        _onError = onError,
        _onDropped = onDropped;
@@ -41,6 +42,12 @@ class WriteBehindQueue {
 
   /// Hard cap on buffered records; beyond it the oldest are dropped.
   final int maxQueued;
+
+  /// Hard cap on the approximate size of buffered records (their JSON
+  /// length); beyond it the oldest are dropped. Without it, 5000 records of
+  /// up to 128 K characters could hold hundreds of megabytes while sealing
+  /// falls behind. The newest record is always kept.
+  final int maxQueuedBytes;
 
   final Queue<LogRecord> _buffer = Queue<LogRecord>();
   int _bytes = 0;
@@ -63,6 +70,10 @@ class WriteBehindQueue {
     }
     _buffer.add(record);
     _bytes += record.approxBytes;
+    while (_bytes > maxQueuedBytes && _buffer.length > 1) {
+      _bytes -= _buffer.removeFirst().approxBytes;
+      _onDropped?.call();
+    }
 
     if (immediate ||
         _buffer.length >= maxBatchEvents ||

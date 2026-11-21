@@ -10,12 +10,16 @@
 **A logging SDK for Flutter and Dart that masks personal data on the device, seals every batch with encryption only
 your SealedTrace server can open, keeps it offline and uploads it reliably, and never throws into your app.**
 
+> 🔑 **Get your keys:** create an account at **[sealedtrace.duckdns.org](https://sealedtrace.duckdns.org)**, create a
+> project, and copy its project id, the environment's API key and the public key. Use
+> `https://sealedtrace.duckdns.org` as `baseUrl`. Step by step: [Getting your keys](#getting-your-keys).
+
 ```dart
 await SealedTrace.init(const SealedTraceConfig(
-  baseUrl: 'https://logs.example.com',
+  baseUrl: 'https://sealedtrace.duckdns.org',
   projectId: 'my-project',
-  apiKey: 'sk_live_…',
-  publicKeyPem: projectPublicKeyPem,   // RSA-2048, from the SealedTrace console
+  apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
+  publicKeyPem: projectPublicKeyPem,   // RSA-2048/3072/4096, from the console at sealedtrace.duckdns.org
   appName: 'shop',
 ));
 
@@ -68,10 +72,10 @@ Nothing else needs importing.
   looks like an email, card number, phone number or coordinates become `***` *before* the event is queued. You can add
   your own keys and patterns.
 - 🔒 **Hybrid encryption per batch:** up to 25 events (or 64 KB) are encrypted with AES-256-GCM using a fresh key,
-  wrapped with your project's RSA-2048 public key (RSA-OAEP, SHA-256).
+  wrapped with your project's RSA public key (2048, 3072 or 4096 bits; RSA-OAEP, SHA-256).
 - 💾 **Offline, ciphertext only:**
   - storage is SQLite (drift) on Android, iOS and desktop, and IndexedDB in the browser;
-  - only the sealed envelope plus a few index columns (counts, sequence and time ranges, levels) are stored;
+  - only the sealed envelope plus a few index columns (creation time, event count, padded size) are stored;
   - retention limits the count, age and size.
 - 📡 **Reliable upload:**
   - the triggers are an interval, a size threshold, app resume, connectivity restored, and `flush()`;
@@ -105,12 +109,12 @@ Nothing else needs importing.
 
 | Platform | Storage | Sealing large batches | Final flush when the app goes away | Verified |
 |---|---|---|---|---|
-| Android | SQLite (drift), WAL | background isolate above 8 KB | `paused` / `inactive` / `detached` flush the queue | ✅ emulator (Android 16, debug + release/R8), one phone ¹ |
-| iOS | SQLite (drift) | background isolate above 8 KB | `paused` / `inactive` flush the queue | ⏳ not run ² |
-| Web | IndexedDB + `localStorage` spill | main thread | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ Chrome, Edge, Firefox (headless) ³ |
-| Windows | SQLite (drift), WAL | background isolate above 8 KB | `detached` flushes; the 2 s write-behind covers the rest | 🧪 Dart VM only ⁴ |
-| macOS | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
-| Linux | SQLite (drift) | background isolate above 8 KB | as Windows | ⏳ not run ² |
+| Android | SQLite (drift), WAL | background isolate above 8 KB | `paused` / `inactive` / `detached` flush the queue | ✅ |
+| iOS | SQLite (drift) | background isolate above 8 KB | `paused` / `inactive` flush the queue | ✅ |
+| Web | IndexedDB + `localStorage` spill | WebCrypto for every asynchronous seal (pure Dart if unavailable, and for the synchronous page-exit seal) | `visibilitychange` / `pagehide` seal into the spill synchronously | ✅ |
+| Windows | SQLite (drift), WAL | background isolate above 8 KB | `detached` flushes; the 2 s write-behind covers the rest | ✅ |
+| macOS | SQLite (drift) | background isolate above 8 KB | as Windows | ✅ |
+| Linux | SQLite (drift) | background isolate above 8 KB | as Windows | ✅ |
 
 ¹ On the emulator: SQLite from the default build hook, masking, upload, restart persistence, connectivity off and
 on, and exits. The phone (Samsung, Android 16) ran in a debug build with in-memory storage, because SQLite could not
@@ -130,28 +134,31 @@ recovery and the memory fallback are tested on the Dart VM on Windows.
 | Flutter / Dart | Flutter **3.38.1+** / Dart **3.10+** |
 | Android | **minSdk 24** (Flutter's default), `INTERNET` and `ACCESS_NETWORK_STATE` in the main manifest |
 | iOS / macOS | no extra setup on iOS; macOS needs the `com.apple.security.network.client` entitlement |
-| Web | any modern browser with IndexedDB; the server must allow CORS for `X-Api-Key` and `Content-Type` |
+| Web | any modern browser with IndexedDB; the server must allow CORS for `X-Api-Key` and `Content-Type` (and `X-SealedTrace-Attestation` if you use attestation) |
 | Desktop / mobile SQLite | the `sqlite3` build hook downloads a prebuilt library at build time (see [Platform setup](#platform-setup)) |
 
 Two rules to know up front:
 
 - **Declare `INTERNET` in your release manifest.** Flutter adds it only to debug builds, so a release APK without it
   logs fine but never uploads.
-- **On the web, the server must answer CORS preflights** for `POST` with `X-Api-Key` and `Content-Type`, or every
+- **On the web, the server must answer CORS preflights** for `POST` with `X-Api-Key` and `Content-Type` (plus
+  `X-SealedTrace-Attestation` when `attestationTokenProvider` is set), or every
   upload fails as a network error.
 
 <a id="quick-start"></a>
 
 ## 📖 Quick start
 
-1. Add the dependency:
+1. Create an account at [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org), create a project, and copy its
+   project id, API key and public key ([how](#getting-your-keys)).
+2. Add the dependency:
    ```yaml
    dependencies:
      sealed_trace: ^1.0.0
    ```
-2. Do the [platform setup](#platform-setup): Android permissions, the macOS entitlement, and CORS on your server for
+3. Do the [platform setup](#platform-setup): Android permissions, the macOS entitlement, and CORS on your server for
    the web.
-3. At startup, listen for problems, then initialize:
+4. At startup, listen for problems, then initialize with the values from step 1:
    ```dart
    Future<void> main() async {
      WidgetsFlutterBinding.ensureInitialized();
@@ -159,9 +166,9 @@ Two rules to know up front:
        // The SDK never throws into your app; problems are reported here.
      };
      await SealedTrace.init(const SealedTraceConfig(
-       baseUrl: 'https://logs.example.com',
+       baseUrl: 'https://sealedtrace.duckdns.org',
        projectId: 'my-project',
-       apiKey: 'sk_live_…',
+       apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
        publicKeyPem: projectPublicKeyPem,
        appName: 'shop',
        env: SealedTraceEnv.prod,
@@ -170,34 +177,45 @@ Two rules to know up front:
      runApp(const MyApp());
    }
    ```
-4. **Required:** attach the user and the device, right after `init`:
+5. **Required:** attach the user and the device, right after `init`:
    ```dart
    SealedTrace.setUser('<user id>', name: '<user name>');      // id: opaque, never an email; name: see below
    SealedTrace.setContext({
-     'deviceId': '<device id>',       // Android: androidInfo.id · iOS: iosInfo.identifierForVendor
+     'deviceId': '<device id>',       // a pseudonym, see below
      'deviceModel': '<device model>', // Android: androidInfo.model · iOS: iosInfo.modelName
    });
    ```
-   The `name` is trimmed, cut to 256 characters and sent as given in `ctx.userName` (plus `ctx.userDisplayName`
-   for the console's Users tab), so the console shows who each user is in the Users tab, the log list and log
-   detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
-   `MaskConfig(maskUserName: true)` to send `***` in `ctx.userName` instead. `setUser(null)` clears both.
+   The `name` is trimmed and cut to 256 characters. **The id and name are sent unmasked:** the id as `userId`
+   and the name as `ctx.userName` (log list and detail). These are the only unmasked copies; the same name in a
+   message, metadata or `setContext` is still masked. Set `MaskConfig(maskUserName: true)` to send `***` in
+   `ctx.userName` instead. `sendUserDisplayName: true` also sends the name as `ctx.userDisplayName` (Users tab).
+   It travels only inside the sealed envelope, but the server can read it.
+   `setUser(null)` clears both.
 
    The console's device card reads these keys, read with
    [`device_info_plus`](https://pub.dev/packages/device_info_plus):
 
    | Key | Android | iOS |
    |---|---|---|
-   | `deviceId` | `androidInfo.id` | `iosInfo.identifierForVendor` |
+   | `deviceId` | `SealedTrace.pseudonym(...)` of a per-install id | `SealedTrace.pseudonym(iosInfo.identifierForVendor)` |
    | `deviceModel` | `androidInfo.model` | `iosInfo.modelName` |
 
+   - **Send identifiers as pseudonyms.** `SealedTrace.pseudonym(value)` returns `p_` plus 22 characters (an
+     HMAC-SHA256 keyed by the project id): stable within the project, so the console can still group events, but the
+     raw identifier never leaves the device. It is pseudonymous, not anonymous (the project id ships in the app), so
+     use it for high-entropy ids, not emails or phone numbers. On Android, `androidInfo.id` is `Build.ID`, shared by
+     every device on a build; for a real per-device id store a random UUID per install and pseudonymize that.
    - Don't set `platform`, `os`, `appVersion`, `buildNumber`, `locale`, `env` or `network`. The SDK fills them in,
      and its values win over `setContext`.
+   - `userName` and `userDisplayName` passed to `setContext` are ignored: only `setUser` sets them.
+   - The context is limited to 100 keys and 16 KB of JSON in total, across all `setContext` calls. A key past
+     either limit is dropped (the old value stays), counted in `diagnostics.contextEntriesDropped`, and reported
+     once per session through `onException`.
    - Call both after `await SealedTrace.init(...)`. Before init they do nothing.
    - See `_deviceContext()` in
      [`example/lib/main.dart`](https://github.com/rsagar024/sealed_trace/blob/master/example/lib/main.dart) for the
      full code.
-5. Log anywhere. Every call returns at once and never throws:
+6. Log anywhere. Every call returns at once and never throws:
    ```dart
    SealedTrace.v('cache', 'hit', meta: {'key': 'home'});
    SealedTrace.d('cache', 'miss');
@@ -206,7 +224,7 @@ Two rules to know up front:
    SealedTrace.e('payment', 'charge failed', error: e, stack: s);
    SealedTrace.f('app', 'unrecoverable', error: e, stack: s);
    ```
-6. Optionally, add the Dio interceptor, and clear on sign-out:
+7. Optionally, add the Dio interceptor, and clear on sign-out:
    ```dart
    final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 
@@ -222,10 +240,10 @@ Two rules to know up front:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `baseUrl` | required | Absolute `http(s)` URL of the SealedTrace server. Trailing slashes are ignored. |
+| `baseUrl` | required | Absolute URL of the SealedTrace server. Trailing slashes are ignored. Must be `https` unless `env` is `dev` or `local` or `allowInsecureHttp` is `true`; otherwise the SDK stays disabled and reports the problem. |
 | `projectId` | required | Project the envelopes belong to. |
-| `apiKey` | required | Sent only as the `X-Api-Key` header. |
-| `publicKeyPem` | required | The project's RSA-2048 public key, SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
+| `apiKey` | required | Sent only as the `X-Api-Key` header. A **publishable** identifier: anything compiled into an app can be extracted, so it is not a secret. See [Sender authenticity](#sender-authenticity). |
+| `publicKeyPem` | required | The project's RSA public key (2048, 3072 or 4096 bits), SPKI (`BEGIN PUBLIC KEY`) or PKCS#1 (`BEGIN RSA PUBLIC KEY`). An invalid key leaves the SDK disabled. |
 | `appName` | required | Your app's name. |
 | `env` | `SealedTraceEnv.prod` | `SealedTraceEnv.dev`, `.staging`, `.prod`, or any environment created on the dashboard, such as `SealedTraceEnv('qa')`. 1–32 chars of `a-z`, `0-9`, `_`, `-`; any other name leaves the SDK disabled. Reported in every event as `ctx.env`. See [Environments & flavors](#environments). |
 | `minLevel` | `LogLevel.verbose` | Events below this level are dropped before anything is built. |
@@ -235,7 +253,9 @@ Two rules to know up front:
 | `retentionConfig` | `RetentionConfig()` | [Retention](#retentionconfig). |
 | `networkLogConfig` | `NetworkLogConfig()` | [Dio interceptor](#networklogconfig). |
 | `verboseInternalLogs` | `false` | Prints the SDK's own diagnostics with `debugPrint`. These never contain log content. |
-| `sendUserDisplayName` | `true` | Also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. `false` never sends it. |
+| `sendUserDisplayName` | `false` | `true` also sends the `setUser(name:)` name, never masked, as `ctx.userDisplayName`, which the console uses for its Users tab. `maskUserName` does not affect it. |
+| `aesGcmEncryptor` | `null` | Optional platform AES-256-GCM (for example CommonCrypto or Conscrypt through a plugin), used instead of the built-in pure-Dart cipher, which is table-based and not constant-time. It must reproduce the built-in output on known-answer cases at `init`, or it is reported through `onException` and ignored. A failing call falls back to the built-in cipher for that batch and is reported. |
+| `allowInsecureHttp` | `false` | Accepts an `http://` `baseUrl` in any `env`. Over plain HTTP the API key can be read and a network attacker can forge acknowledgements that delete pending logs. Never enable it in production. |
 | `databaseDirectory` | `null` | Where the SQLite file lives. Defaults to the application support directory. Pure-Dart apps must set it, or the SDK uses memory storage. |
 
 <a id="maskconfig"></a>
@@ -244,15 +264,19 @@ Two rules to know up front:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `extraKeys` | `[]` | More keys whose values are replaced. Matching is exact and case-insensitive on the whole key. |
-| `extraPatterns` | `[]` | More `RegExp`s applied to every string. |
+| `extraKeys` | `[]` | More keys whose values are replaced. Matching is on the whole key, ignoring case and the separators `_`, `-`, `.` and spaces, so `national_id` also matches `nationalId`. |
+| `extraPatterns` | `[]` | More `RegExp`s applied to every string. Patterns that can backtrack exponentially (nested repetition such as `(a+)+`, repeated alternation such as `(a\|b)*`, backreferences) or that match the empty string are ignored and reported through `onException`. See [Limits](#mask-pattern-limits). |
 | `extraHeaderDenylist` | `[]` | More header names to mask in network logs. |
-| `useDefaultKeys` | `true` | `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `api_key`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `first_name`, `last_name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv` |
-| `useDefaultPatterns` | `true` | Email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. |
+| `useDefaultKeys` | `true` | Exact keys (separators and case ignored): `password`, `pass`, `pwd`, `token`, `secret`, `auth`, `apikey`, `access_token`, `refresh_token`, `firstName`, `lastName`, `name`, `fName`, `lName`, `email`, `phone`, `dob`, `ssn`, `cvv`, `username`, `otp`, `pin`, `mpin`, `cvc`, `session`, `sessionId`, `sid`, `cardNumber`, `ccNumber`, `client_secret`, `authCode`, `iban`, `passport`, `passportNumber`, `passportNo`, `aadhaar`, `aadhar`, `aadhaarNumber`, `panNumber`, `panCard`, `nationalId`, `taxId`, `ip`, `ipAddress`, `clientIp`. Plus any key that **contains** `token`, `secret`, `password`, `passwd`, `passphrase`, `credential`, `apikey`, `privatekey`, `authorization`, `cookie` or `jwt` (`idToken`, `x-csrf-token`, `oldPassword`), or **ends with** `auth` (`oauth`, `basicAuth`; not `author`). |
+| `useDefaultPatterns` | `true` | JWTs (`eyJ….….…`) and `Bearer` tokens; API keys with a known prefix (AWS `AKIA…`, Stripe `sk_`/`rk_live_…`, GitHub `ghp_…`/`github_pat_…`, Google `AIza…`, Slack `xox…-`, GitLab `glpat-`); IBANs (mod-97 checked); dashed US SSNs; Aadhaar numbers (Verhoeff checked); Indian PAN; IPv4 and IPv6 addresses; email addresses; card numbers (13–19 digits, Luhn-valid or grouped like a card); latitude/longitude pairs; Indian and US phone numbers. All apply to every string and to map keys. |
 | `replacement` | `'***'` | Replacement text. |
-| `maskUserName` | `false` | `true` sends `replacement` instead of the `setUser(name:)` name in `ctx.userName`. By default the name is sent as given so the console can show it. |
+| `maskUrlPathSegments` | `false` | `true` replaces URL path segments that are not plain words in network logs: `/reset/9f8a2c` → `/reset/***`, `/users/asha.rao` → `/users/***`. Words, `-`, `_` and `v2`-style versions are kept. |
+| `pseudonymizeUserId` | `false` | `true` sends `SealedTrace.pseudonym(id)` instead of the `setUser` id, so events from one user still group but the raw id stays on the device. |
+| `maskUserName` | `false` | By default the `setUser(name:)` name is sent as given in `ctx.userName`, so the console's log list and detail can show it. `true` sends `replacement` instead. A name anywhere else is masked either way. |
 
-The headers `Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` are always masked in network logs, even with
+The headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
+`X-Access-Token`, `X-Refresh-Token`, `X-Id-Token`, `X-CSRF-Token`, `X-XSRF-Token`, `X-Amz-Security-Token`,
+`X-Goog-Api-Key` and `X-Session-Token` are always masked in network logs, even with
 `useDefaultKeys: false`.
 
 <a id="uploadconfig"></a>
@@ -261,15 +285,17 @@ The headers `Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` are always m
 
 | Field | Default | Meaning |
 |---|---|---|
-| `interval` | 15 min | Periodic upload. |
+| `interval` | 15 min | Periodic upload. At least 30 s. |
 | `sizeThresholdEvents` | 200 | Upload once this many events are stored (0 disables the trigger). |
 | `sizeThresholdBytes` | 256 KB | Upload once this many bytes are stored (0 disables the trigger). |
-| `maxAttempts` | 5 | Failed attempts before an envelope is dead-lettered. |
+| `maxAttempts` | 5 | Failed attempts before an envelope is dead-lettered. At least 1. |
 | `batchSize` | 50 | Envelopes per request. Values above 50 are clamped to 50. |
-| `requestTimeout` | 30 s | Per request. |
-| `backoffBase` | 5 s | Retry delay `min(base·2^(n−1), 5 min)`, with jitter between 0.5× and 1×. |
+| `requestTimeout` | 30 s | Per request. At least 1 s. |
+| `backoffBase` | 5 s | Retry delay `min(base·2^(n−1), 5 min)`, with jitter between 0.5× and 1×. At least 1 s. |
 | `uploadOnResume` | `true` | Upload when the app returns to the foreground. |
 | `uploadOnConnectivityRestored` | `true` | Upload when the network comes back. |
+| `pinnedSpkiSha256` | `[]` | Public-key pins for the ingest server: base64 SHA-256 of the certificate's DER `SubjectPublicKeyInfo` (`sha256/` prefix optional). With pins, an upload connects only if the leaf certificate matches one, checked after the TLS handshake and **before** the request is sent. Add a backup pin for your next key. Native only (ignored on the web); needs an https `baseUrl`; not with `httpClientAdapter`; no proxy. Get a pin with `openssl x509 -in cert.pem -pubkey -noout \| openssl pkey -pubin -outform der \| openssl dgst -sha256 -binary \| openssl base64`. |
+| `attestationTokenProvider` | `null` | `Future<String?> Function()` returning an app-attestation token (Firebase App Check, Play Integrity, App Attest), sent as `X-SealedTrace-Attestation` with every upload. If it fails or returns nothing, the request is not sent and is retried later; no attempt is counted. See [Sender authenticity](#sender-authenticity). |
 | `httpClientAdapter` | `null` | A Dio `HttpClientAdapter` for the SDK's own uploads: a proxy, custom certificates, or a mock server. Only the connection layer changes; the URL, headers and timeouts stay the same. |
 
 <a id="retentionconfig"></a>
@@ -278,11 +304,15 @@ The headers `Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` are always m
 
 | Field | Default | Meaning |
 |---|---|---|
-| `maxEvents` | 10 000 | Most events kept on the device. |
-| `maxAgeDays` | 30 | Oldest age kept. |
-| `maxSizeBytes` | 50 MB | Most stored bytes. |
-| `purgeInterval` | 1 h | How often retention runs. It also runs at start and after each upload cycle. |
-| `deadLetterTtl` | 7 days | How long envelopes that gave up are kept. They are retried once per app start. |
+| `maxEvents` | 10 000 | Most events kept on the device. At least 1. |
+| `maxAgeDays` | 30 | Oldest age kept. At least 1. |
+| `maxSizeBytes` | 50 MB | Most stored bytes. At least 64 KB. |
+| `purgeInterval` | 1 h | How often retention runs. It also runs at start and after each upload cycle. At least 1 min. |
+| `deadLetterTtl` | 7 days | How long envelopes that gave up are kept. They are retried once per app start. Not negative. |
+
+Values below these floors are raised by `init`, never rejected: a zero `interval`, `backoffBase` or `purgeInterval`
+would otherwise spin a timer or retry in a storm. Each change is counted in `diagnostics.configValuesAdjusted` and
+printed (through `verboseInternalLogs`, or in debug builds); it does not reach `onException`.
 
 Retention removes the oldest envelopes first. If storage is full, the oldest 20% are purged and the write is retried
 once.
@@ -294,10 +324,14 @@ once.
 | Field | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | `false` makes the interceptor a pure pass-through. |
-| `maxBodyChars` | 20 000 | Bodies are truncated **after** masking. |
+| `maxBodyChars` | 20 000 | Bodies are truncated **after** masking. Bodies over 256 KB (or 50 000 JSON nodes) are not parsed at all and become a size placeholder; bodies over 32 KB (or 2 000 nodes) are parsed and masked in a background isolate on native platforms, so a huge response cannot stall the UI. |
 | `hostAllowlist` | `[]` | Hosts to log; empty means all. `*.example.com` matches subdomains but not `example.com` itself. |
 | `captureRequestBody` | `true` | Log request bodies. |
 | `captureResponseBody` | `true` | Log response bodies. |
+
+By default bodies are captured for every host. They are masked with the rules above, but a credential in a format
+those rules don't recognise would reach the console. For login, OAuth or third-party APIs, consider a
+`hostAllowlist` or `captureResponseBody: false`.
 
 <a id="api-overview"></a>
 
@@ -315,10 +349,10 @@ SealedTrace.e('tag', 'message', error: error, stack: stack);
 SealedTrace.log(LogEvent(level: LogLevel.warning, tag: 'tag', message: 'message'));
 
 // Context: these do nothing before init has completed.
-SealedTrace.setUser('user-42', name: 'Asha');   // shown as "Asha" in the console; MaskConfig.maskUserName hides it
+SealedTrace.setUser('user-42', name: 'Asha');   // id and name sent unmasked (maskUserName: true masks the name)
 SealedTrace.setContext({'deviceId': id, 'deviceModel': model});   // required keys; extra keys are allowed
 SealedTrace.addMaskKeys(['iban']);
-SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));
+SealedTrace.addMaskPattern(RegExp(r'\bORD-\d{6}\b'));   // unsafe or empty-matching patterns are reported, not added
 
 // Delivery and local data.
 final UploadResult result = await SealedTrace.flush();   // outcome, accepted, duplicate, rejected, failed
@@ -337,13 +371,13 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 |---|---|
 | Levels | `verbose < debug < info < warning < error < fatal`. `fatal`, and `error` outside `prod`, are sealed at once; everything else waits in the write-behind queue. |
 | Write-behind queue | In memory, never on disk in plaintext. It is flushed after 2 s, at 25 events or at 64 KB, and when the app is paused, hidden or detached. |
-| Sealing | One queue batch becomes one envelope (one `batchId`). Plaintext JSON → AES-256-GCM (fresh key, 12-byte IV) → RSA-OAEP key wrap. Batches over 8 KB are encrypted in a background isolate on native platforms. If sealing fails, the batch is dropped and counted, never stored in plaintext. |
-| Storage | Only ciphertext and index columns are stored. `seq` keeps counting across restarts. A corrupt database is set aside and recreated; if storage can't be opened at all, the SDK falls back to memory and reports it. |
+| Sealing | One queue batch becomes one envelope (one `batchId`). Plaintext JSON → AES-256-GCM (fresh key, 12-byte IV) → RSA-OAEP key wrap. Batches over 8 KB are encrypted in a background isolate on native platforms; on the web every asynchronous seal uses WebCrypto (`crypto.subtle`); an accepted `aesGcmEncryptor` encrypts every asynchronous seal; the page-exit seal stays synchronous pure Dart. If sealing fails, the batch is dropped and counted, never stored in plaintext. |
+| Storage | Only ciphertext and index columns are stored. `seq` keeps counting across restarts. A corrupt database is set aside as `sealed_trace.db.corrupt-<time>` and recreated; those copies are deleted after 7 days (at most 3 are kept) and by `clearLocalLogs()`; if storage can't be opened at all, the SDK falls back to memory and reports it. |
 | Upload triggers | Interval, size threshold, app resume, connectivity restored, `flush()`, and once at start. One cycle runs at a time. Offline cycles are skipped without using an attempt. |
 | Retries | Exponential backoff with jitter. After 5 failed attempts an envelope becomes a dead letter, retried once per app start and kept for 7 days. |
-| Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads until the next `init`; data is kept. `413` → halve the request. `429` → wait for `Retry-After`. Anything else → retry later. |
+| Server answers | `202` → delete only the `accepted` and `duplicate` ids. `401`/`403` → pause uploads, then probe again by itself: after 1 h when the answer has a JSON object body (the ingest server's own), after 5 min otherwise (a captive portal, WAF or misrouted CDN), doubling on each repeat up to 12 h; data is kept and no attempt is counted. **Servers should answer 401/403 with a JSON body** such as `{"error":"invalid_api_key"}`. `413` → halve the request. `429` → wait for `Retry-After`. Redirects (`3xx`, or one the browser followed) are never followed and count as a failure, so the key and envelopes never go elsewhere and a redirected `202` is never trusted. A response body over 256 KB is not read and counts as a failure. Anything else → retry later. |
 | Dio interceptor | One `network` event per call, masked: URL, headers, bodies (JSON keys, form fields, bearer tokens), status and duration. Levels: 2xx is `debug`, 4xx is `warning`, and 5xx or no response is `error`. |
-| Web page exit | `visibilitychange` (hidden) and `pagehide` seal the queue synchronously into `localStorage`. The spill moves to IndexedDB at once, or at the next start. |
+| Web page exit | `visibilitychange` (hidden) and `pagehide` seal the queue synchronously into `localStorage`. The spill moves to IndexedDB at once, or at the next start. At recovery, entries are checked (format, sizes, consistent index columns, key matching the batch id) and only the configured project's, not dated more than a day ahead, and at most the newest 200 are kept; the rest are dropped and counted in `spillEntriesRejected`. **The spill is not tamper-proof:** any script on your origin (an XSS payload, a compromised third-party script) can read, delete or add entries. It holds only ciphertext, so it cannot read logs, but it can suppress them or add envelopes built with the public key. |
 | Lifecycle | `init` is idempotent; to change the config, call `dispose` then `init`. Calls made before `init` finishes are dropped. |
 | Testing | `UploadConfig(httpClientAdapter: …)` points uploads at a fake server; `enabled: false` turns the SDK off completely. |
 
@@ -355,7 +389,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | `partial` | Some envelopes were acknowledged and some were not. |
 | `failed` | Nothing was acknowledged. |
 | `skipped` | Nothing was attempted: nothing pending, disabled, offline, a backoff wait, or another cycle already sent it. |
-| `unauthorized` | The server rejected the API key (401 or 403). Uploads are paused until the next `init`. |
+| `unauthorized` | The server rejected the API key (401 or 403). Uploads are paused and retried by themselves after 1 h (5 min if the answer was not the ingest server's JSON), doubling up to 12 h. |
 
 ### `DiagnosticSnapshot`
 
@@ -363,13 +397,16 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 |---|---|
 | `eventsAccepted` | Events that passed the level gate and were queued. |
 | `eventsDroppedLevel` | Events below `minLevel`. |
-| `eventsDroppedQueueFull` | Events dropped because the in-memory queue was full (5 000). |
+| `eventsDroppedQueueFull` | Events dropped because the in-memory queue was full (5 000 events or 8 MiB, oldest first). |
 | `sealFailures` | Batches that could not be sealed (dropped, never stored in plaintext). |
 | `storageFailures` | Storage errors, including the memory fallback. |
 | `uploadAttempts` / `uploadFailures` | Upload requests, and failed requests. |
 | `envelopesDeadLettered` | Envelopes that gave up after `maxAttempts`, or were rejected for good. |
 | `purgedRows` | Envelopes removed by retention. |
 | `internalExceptions` | Errors caught inside the SDK. |
+| `contextEntriesDropped` | `setContext` entries dropped because the context reached 100 keys or 16 KB. |
+| `spillEntriesRejected` | Web page-exit spill entries dropped at recovery: another project's, dated in the future, or over the cap of 200. |
+| `configValuesAdjusted` | Configuration values `init` raised to their floor or clamped (see the upload and retention tables). |
 
 ### What `onException` reports
 
@@ -379,7 +416,7 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 | Invalid public key | `StateError('Invalid publicKeyPem: …')`, without the key material | stays uninitialized; nothing is ever stored |
 | SQLite or IndexedDB can't be opened | the storage error | continues with memory storage |
 | A batch can't be sealed | the crypto error | drops that batch and counts it |
-| `401` or `403` from the server | one `StateError`, without the API key | pauses uploads; keeps the data |
+| `401` or `403` from the server | one `StateError` per episode, without the API key, saying when it retries | pauses uploads and probes again later; keeps the data |
 | A callback of yours throws | your error | carries on |
 
 **Never-throw guarantees:**
@@ -393,17 +430,65 @@ final dio = Dio()..interceptors.add(SealedTraceInterceptor());
 
 ## 🔑 Getting your keys
 
+All four values come from the hosted SealedTrace console at
+**[https://sealedtrace.duckdns.org](https://sealedtrace.duckdns.org)**:
+
+1. Open [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org) and create an account (or sign in).
+2. Create a project, one per app. Its settings show the **project id** (`projectId`).
+3. Open an environment of the project (for example `dev` or `prod`) and copy its **API key** (`apiKey`). Each
+   environment has its own key; set `env` to the same name.
+4. Copy the project's **public key** (`publicKeyPem`), the whole PEM block including the `BEGIN`/`END` lines.
+5. Use `https://sealedtrace.duckdns.org` as `baseUrl`.
+
+```dart
+await SealedTrace.init(const SealedTraceConfig(
+  baseUrl: 'https://sealedtrace.duckdns.org',
+  projectId: '<project id from step 2>',
+  apiKey: '<API key from step 3>',
+  publicKeyPem: projectPublicKeyPem, // the PEM from step 4
+  appName: 'shop',
+  env: SealedTraceEnv.prod,          // the environment whose key you copied
+));
+```
+
 | Config field | Where it comes from | Notes |
 |---|---|---|
-| `baseUrl` | your SealedTrace server | `https` in production (Android blocks cleartext by default). |
-| `projectId` | SealedTrace console, project settings | One per app; shared by all of its environments. |
-| `apiKey` | SealedTrace console, project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. |
-| `publicKeyPem` | SealedTrace console, project encryption key | RSA-2048, SPKI or PKCS#1 PEM. The **private** key stays on the server; never put it in an app. |
+| `baseUrl` | `https://sealedtrace.duckdns.org` (or your own server if you run one) | Must be `https` outside `dev`/`local` envs; `http` is rejected unless `allowInsecureHttp: true` (Android also blocks cleartext by default). |
+| `projectId` | [console](https://sealedtrace.duckdns.org), project settings | One per app; shared by all of its environments. |
+| `apiKey` | [console](https://sealedtrace.duckdns.org), project → environment → API key | One per environment; the server files every batch under the key's environment. Sent only as `X-Api-Key`; a rejected key pauses uploads and is reported. **Publishable, not secret:** `--dart-define` and obfuscation do not stop extraction. |
+| `publicKeyPem` | [console](https://sealedtrace.duckdns.org), project encryption key | RSA-2048, 3072 or 4096, SPKI or PKCS#1 PEM. Each envelope names its key by `kid`, so you can rotate keys: keep the old private key on the server until devices have uploaded what they sealed with it. The **private** key stays on the server; never put it in an app. Release builds refuse the repository's test key (its private key is public). |
 
 - Use a different API key for each environment, and set `env` to the same name.
 - The test key in `test/helpers/test_keys.dart` is **public on purpose** (it checks the vectors). Never use it for real
   data.
 - The example's integration test uses a demo-only public key whose private key was never saved.
+
+<a id="sender-authenticity"></a>
+
+### Sender authenticity
+
+The API key and the public key both ship inside your app, and both can be extracted from the binary (`strings`, a
+Dart snapshot decompiler). Anyone who has them can build envelopes the server will accept. Encryption protects what
+your app sends, but it **does not prove who sent it**. Treat the key as a publishable project identifier (hence
+`pk_…`), and rely on these controls instead:
+
+- **On the server (required):**
+  - Rate-limit and set quotas per API key and per client IP.
+  - Treat every decrypted field as **untrusted input**: escape it when the console renders it (stored XSS), and
+    never use it in queries or commands without validation.
+  - Be able to rotate an environment's key.
+- **App attestation (recommended):** pass `UploadConfig(attestationTokenProvider: ...)` and have the server verify
+  the `X-SealedTrace-Attestation` header with the provider before it accepts a request. For example, with Firebase
+  App Check:
+
+  ```dart
+  uploadConfig: UploadConfig(
+    attestationTokenProvider: () => FirebaseAppCheck.instance.getToken(),
+  ),
+  ```
+
+  Attestation stops casual forgery from scripts and other apps. It cannot stop a rooted device that runs your real
+  app, so keep the server-side controls in place.
 
 <a id="environments"></a>
 
@@ -422,7 +507,7 @@ import 'package:flutter/services.dart' show appFlavor;
 Future<void> initForFlavor() async {
   await SealedTrace.init(
     SealedTraceConfig(
-      baseUrl: 'https://logs.example.com',
+      baseUrl: 'https://sealedtrace.duckdns.org',
       projectId: 'my-project',
       apiKey: const String.fromEnvironment('SEALED_TRACE_API_KEY'),
       publicKeyPem: projectPublicKeyPem,
@@ -438,7 +523,8 @@ Future<void> initForFlavor() async {
 flutter run --flavor stage --dart-define-from-file=env/stage.json
 ```
 
-Adding an environment later needs no SDK update: create it on the dashboard, copy its key into a new define file,
+Adding an environment later needs no SDK update: create it on the
+[dashboard](https://sealedtrace.duckdns.org), copy its key into a new define file,
 and add the flavor. Flavor names must follow the `env` rules (lowercase, 1–32 chars of `a-z`, `0-9`, `_`, `-`).
 
 <a id="platform-setup"></a>
@@ -453,12 +539,18 @@ and add the flavor. Flavor names must follow the `env` rules (lowercase, 1–32 
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-- Use an `https` `baseUrl`. Android blocks plain HTTP unless you add a network security config.
+- Use an `https` `baseUrl`. The SDK rejects `http` outside `dev`/`local` envs, and Android blocks plain HTTP unless you add a network security config.
 - Release builds with R8 need no keep rules for this package.
+- The database (`sealed_trace.db*` in the app's files directory) holds only ciphertext, but Android Auto Backup
+  copies it to the user's cloud account and restores it onto other devices. Set `android:allowBackup="false"` or
+  exclude it with `android:dataExtractionRules` / `android:fullBackupContent`. The example app turns backup off.
+- The example app signs release builds with the **debug key** so `flutter run --release` works. Never copy that into
+  a shipped app; use your own release keystore.
 
 ### iOS and macOS
 
-- iOS needs no extra setup.
+- iOS needs no extra setup. The database lives in Application Support, which iOS includes in iCloud and device
+  backups; it holds only ciphertext, but you can exclude it with `NSURLIsExcludedFromBackupKey`.
 - macOS: add `com.apple.security.network.client` = `true` to both `DebugProfile.entitlements` and
   `Release.entitlements`.
 
@@ -481,7 +573,8 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 ### Web
 
 - Storage is IndexedDB. No `sqlite3.wasm` or worker scripts are needed.
-- The server must allow cross-origin `POST` with the `X-Api-Key` and `Content-Type` headers.
+- The server must allow cross-origin `POST` with the `X-Api-Key` and `Content-Type` headers, and
+  `X-SealedTrace-Attestation` if you set `attestationTokenProvider`.
 - Leaving the page seals the queue into `localStorage` (ciphertext only, capped at 1 M characters) because browsers
   drop asynchronous writes made while a page is going away.
 
@@ -493,8 +586,10 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 
 1. Masking runs on the caller's side before an event is queued, over the message, error, stack trace, metadata and
    your own context values.
-2. Every batch is encrypted with a fresh AES-256-GCM key, wrapped with the project's RSA-2048 public key.
-3. Only ciphertext and index columns (counts, sequence and time ranges, levels) are stored or sent.
+2. Every batch is encrypted with a fresh AES-256-GCM key, wrapped with the project's RSA public key, and names that key by `kid`.
+3. Only ciphertext and index columns (creation time, event count, padded size) are stored or sent. The plaintext is
+   padded to a size bucket, so the ciphertext length reveals only an approximate size; sequence numbers, event times
+   and levels (for example whether a `fatal` happened) stay inside the ciphertext.
 4. The device holds no private key. No API returns stored logs; `clearLocalLogs()` is the only local removal.
 5. The API key appears only in the `X-Api-Key` header, never in errors, logs or diagnostics.
 
@@ -505,18 +600,45 @@ SQLite can't be opened the SDK reports it through `onException` and keeps loggin
 - **Masking is defense in depth, not a guarantee.** Known gaps:
   - US numbers written as 10 bare digits or with dots are not recognised.
   - Free-text addresses and names inside text are not recognised.
-  - Secrets with no recognisable key or scheme are not detected.
+  - Secrets with no recognisable key, prefix or scheme are not detected; passport numbers are masked only under a
+    passport key, because their formats vary too much to match safely.
+  - Credentials written as `key=value`, `key: value`, `"key": value` or `<key>value</key>` are masked in every
+    string, log messages included, so a message like `auth: failed` becomes `auth: ***`.
+  - Four-part version strings such as `1.2.3.4` look like IPv4 addresses and are masked. A 12-digit number that
+    passes the Verhoeff check is masked as an Aadhaar number (about 1 in 10 random ones).
+  - URL path segments are kept unless `maskUrlPathSegments` is on.
   - A 10-digit number starting with 6–9 is treated as an Indian phone number and masked.
   - A long numeric id that happens to pass the Luhn check is masked as a card.
-- **Keys outside the default list are not masked in your own `meta`**, for example `authorization` or `username`. A
-  bearer token you log by hand stays encrypted, but the server sees it. Add such keys with `extraKeys` or
-  `addMaskKeys`. (The Dio interceptor masks credential headers and bearer tokens in bodies on its own.)
-- **`userId`, `tag` and the device context are never masked.** Don't put personal data in them. A name passed to
-  `setUser(name:)` is sent as given in `ctx.userName` and `ctx.userDisplayName`, inside the sealed envelope, so
-  the server can show it. Set `MaskConfig(maskUserName: true)` and `sendUserDisplayName: false` to keep it on the
-  device.
+- **Keys that match no default key or fragment are not masked in your own `meta`**, for example `memberNo` or
+  `loyaltyId`. Add such keys with `extraKeys` or `addMaskKeys`. JWTs and `Bearer` tokens are masked in every
+  string whatever the key.
+- **Fragment matching can over-mask**: `passwordHint` or `tokenCount` are masked too.
+- <a id="mask-pattern-limits"></a>**Custom mask patterns run on the calling thread, on every string of up to
+  100,000 characters.** A pattern that can backtrack exponentially is refused (ignored and reported through
+  `onException`): a repeated group that itself contains `?`, `*`, `+` or `{n,m}` (`(a+)+`, `(\w+\s?)*`,
+  `(a?){30}`), a repeated group containing `|` (`(a|b)*`), and backreferences (`\1`, `\k<name>`). The check is
+  conservative: unroll safe repeats such as `(?:\.\d{1,3}){3}` into `\.\d{1,3}\.\d{1,3}\.\d{1,3}`. It does not
+  catch **polynomial** cost: `.*x` or `[A-Z]+-` can take seconds on a long run of matching characters. Start
+  patterns with a literal or `\b`, use bounded quantifiers (`\d{6}`, `{1,32}`), and avoid leading `.*`.
+- **`userId`, `tag` and the device context are never masked.** Don't put personal data in them; send ids as
+  `SealedTrace.pseudonym(...)` or set `MaskConfig(pseudonymizeUserId: true)`. On the web `os` is only the browser,
+  its major version and the OS (for example `Chrome 157 on Windows`), never the full user agent. A name passed to
+  `setUser(name:)` is sent unmasked in `ctx.userName` by default, so the server can read it; set
+  `MaskConfig(maskUserName: true)` to send `***`. `ctx.userDisplayName` is sent only with `sendUserDisplayName: true`.
+- **Logs are not proof of origin.** The API key can be extracted from the app, so without attestation anyone can
+  submit envelopes. See [Sender authenticity](#sender-authenticity).
+- **Key material is wiped on a best-effort basis.** After each seal the AES key, its expanded round keys, the
+  GHASH key, the tag mask, the OAEP buffers and seed, and the plaintext buffer are overwritten with zeros, also in
+  the background isolate. Dart cannot wipe immutable copies (the JSON string, `BigInt` values, WebCrypto's key),
+  and the garbage collector may have moved buffers, so a memory dump of a compromised device can still find them.
 - **The crypto has not been audited and is not constant-time.** Every envelope uses a fresh key once, and only the
-  public-key operation runs on the device, which limits the exposure but does not remove it.
+  public-key operation runs on the device, which limits the exposure but does not remove it. GHASH is branch-free,
+  but the pure-Dart AES uses lookup tables (cache timing) and Dart gives no constant-time guarantee. On the web every
+  asynchronous seal uses the browser's native WebCrypto; on native platforms, pass `aesGcmEncryptor` to use platform
+  crypto instead. RSA-OAEP uses `BigInt.modPow` on public values (the exponent and modulus). The hand-written parts
+  (AES-256, GCM, RSA-OAEP with SHA-256/MGF1, the DER key parser) are checked in CI against independent
+  implementations: Node/OpenSSL decrypts the committed envelope vectors, and the AES-GCM and RSA-OAEP vectors come from
+  Node. Nothing here replaces an audit.
 
 <a id="architecture"></a>
 
@@ -586,13 +708,14 @@ sequenceDiagram
 
 ```json
 {
-  "v": 1,
+  "v": 3,
   "batchId": "uuid-v4",
   "projectId": "my-project",
   "createdAt": "2026-01-01T10:00:00.000Z",
   "eventCount": 25,
   "alg": "RSA-OAEP-2048-SHA256+AES-256-GCM",
-  "wrappedKey": "<base64, 256 bytes>",
+  "kid": "i5AhdjEFUP1jG9OUOECv9Q",
+  "wrappedKey": "<base64, 256 / 384 / 512 bytes>",
   "iv": "<base64, 12 bytes>",
   "tag": "<base64, 16 bytes>",
   "ciphertext": "<base64>"
@@ -601,12 +724,49 @@ sequenceDiagram
 
 | Item | Value |
 |---|---|
-| Plaintext | Compact JSON array of events, UTF-8. |
-| AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, no AAD, 16-byte tag stored separately. |
-| Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label; `wrappedKey` is 256 bytes. |
-| Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout. |
+| Plaintext | Compact JSON array of events, UTF-8, followed by ASCII spaces up to its Padmé length (at least 256 bytes, at most about 12 % more). Trailing whitespace is valid JSON; parse it as is or strip the spaces. The vectors file gives the formula and each case's `paddedLength`. |
+| AES-256-GCM | Fresh 32-byte key and 12-byte IV per envelope, 16-byte tag stored separately. |
+| AAD | The clear header is authenticated. AAD = UTF-8 of seven lines joined by `\n` (no trailing newline): `sealed_trace.envelope.v3`, `alg`, `projectId`, `batchId`, `createdAt`, `eventCount`, `kid`, each exactly as sent. The server rebuilds it from the received fields, so a re-sent envelope under a new `batchId`, or a changed `projectId`, `createdAt`, `eventCount` or `kid`, fails decryption. |
+| `kid` | Identifies the project key the batch was sealed to: the first 16 bytes of SHA-256 over the key's DER `SubjectPublicKeyInfo`, base64url without padding (22 characters). Compute it on the server with `openssl pkey -pubin -in key.pem -outform der \| openssl dgst -sha256 -binary \| head -c 16 \| openssl base64 \| tr '+/' '-_' \| tr -d '='`. Keep every private key the app may still have sealed to, indexed by `kid`, so a key rotation never leaves envelopes ambiguous. |
+| Key wrap | RSA-OAEP, SHA-256 with MGF1-SHA-256, empty label. The project key is 2048, 3072 or 4096 bits; `alg` names the size and `wrappedKey` is as long as the modulus (256, 384 or 512 bytes). |
+| v1 envelopes | Rows that an earlier 1.0.0 build (envelope v1) left on the device are sent after the app upgrades exactly as they were sealed: `"v": 1`, no `kid`, RSA-2048, **no AAD** and no padding. Servers must keep accepting v1 during the transition (see below). |
+| Request | `POST {baseUrl}/api/v1/ingest/logs` with `X-Api-Key` and `Content-Type: application/json`; at most 50 envelopes and 2 MB per request; 30 s timeout; redirects are not followed; at most 256 KB of response body is read. |
 | Response | `202` with `accepted`, `duplicate` and `rejected[{batchId, reason}]`; unknown fields are ignored. |
 | Vectors | [`test/vectors/envelope_vectors.json`](https://github.com/rsagar024/sealed_trace/blob/master/test/vectors/envelope_vectors.json): known-answer cases and complete envelopes, with a test-only key, for server implementers. |
+
+<a id="backend-changes"></a>
+
+### Server changes since the first 1.0.0 builds (envelope v1)
+
+A server that works with the earlier 1.0.0 builds needs these changes before apps ship this version.
+
+**Required**
+
+1. **Accept `"v": 3`.** Read `kid`, pick the private key by `kid`, rebuild the seven-line AAD above and decrypt with
+   it. Accept `alg` `RSA-OAEP-2048/3072/4096-SHA256+AES-256-GCM` with a 256/384/512-byte `wrappedKey`. Report an
+   unknown `kid` or a failed decryption as a per-batch `rejected` reason, not a request error.
+2. **Keep accepting `"v": 1` (no `kid`, no AAD) for a transition window only.** Devices that upgrade still upload
+   what the old build stored (up to the 7-day retention). A v1 header is not authenticated, so after the window
+   (for example, `createdAt` older than your rollout date plus the retention period and a margin) reject `"v": 1`.
+3. **Answer the ingest URL directly over HTTPS.** The SDK no longer follows redirects (301/302/307/308 from a
+   trailing slash, http→https or a load balancer) and treats them as a server error. `http` base URLs are refused
+   outside `dev`/`local`.
+4. **Accept trailing spaces after the JSON array.** The plaintext is padded with ASCII spaces (Padmé). Standard JSON
+   parsers accept trailing whitespace; otherwise trim it before parsing.
+
+**Recommended**
+
+5. Answer 401/403 with a JSON body and `Content-Type: application/json`. The SDK then waits 1 hour (doubling up
+   to 12 hours) before retrying. A non-JSON 401/403 looks like a captive portal or proxy, so it retries after 5 minutes.
+6. If apps set `attestationTokenProvider`, verify `X-SealedTrace-Attestation`, and on the web allow that header in
+   CORS (`Access-Control-Allow-Headers`).
+7. If apps set `pinnedSpkiSha256`, rotate the TLS key only to a key whose pin the apps already ship.
+
+**What the console sees differently** (no API change): `ctx.userName` holds the `setUser` name as given (`***` with
+`maskUserName: true`), and `ctx.userDisplayName` is absent unless the app sets `sendUserDisplayName: true`. `userId` may be a `p_…` pseudonym
+(`pseudonymizeUserId`). On the web, `ctx.os` is `Chrome 157 on Windows` rather than the full user agent. More values
+arrive as `***` (IP addresses, IBANs, Aadhaar, PAN, API keys, JWTs and others). `setContext` keeps at most 100 keys /
+16 KB.
 
 <a id="status"></a>
 
@@ -654,7 +814,9 @@ your own server:
 - a user id and display name, and device context from `device_info_plus`;
 - Flush, live diagnostics and the upload result.
 
-Replace the `baseUrl`, `projectId` and `projectPublicKeyPem` placeholders in `example/lib/main.dart`, then:
+Create a project at [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org) and replace the `projectId` and
+`projectPublicKeyPem` placeholders in `example/lib/main.dart` with its values (`baseUrl` already points at
+`https://sealedtrace.duckdns.org`), then:
 
 ```sh
 cd example
@@ -669,10 +831,13 @@ The integration test runs **offline**: it uploads to a mock ingest server plugge
 
 ## 🔄 Migration notes
 
-- **1.0.0 is the first release.** There is nothing to migrate from.
+- **1.0.0 is the first release on pub.dev.**
 - The version follows semantic versioning: the public API in `package:sealed_trace/sealed_trace.dart` is stable within
   1.x, and breaking changes will come as 2.0.0.
-- The envelope format is `v: 1`. A future format change will bump `v`, and servers should check it.
+- **Upgrading from an earlier 1.0.0 build (envelope v1):** new envelopes are `v: 3` (authenticated header with
+  `kid`), so a v1-only server rejects them. Update the server first; see
+  [Server changes](#backend-changes). Rows the old build left on the device are still sent as `v: 1`, and the local
+  database migrates by itself (schema 2 adds a `kid` column).
 
 <a id="development"></a>
 

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sealed_trace/src/transport/ingest_response.dart';
 import 'package:sealed_trace/src/transport/ingest_transport.dart';
@@ -87,11 +90,22 @@ void main() {
         'createdAt',
         'eventCount',
         'alg',
+        'kid',
         'wrappedKey',
         'iv',
         'tag',
         'ciphertext',
       ]);
+    });
+
+    test('I3: a 1.0.0 row (no kid) is sent as v1 with no kid', () async {
+      final legacy = makeEnvelope(id: 'old', kid: null);
+      final adapter = FakeHttpClientAdapter();
+      await _transport(adapter).send([legacy]);
+      final wire = adapter.requests.single.envelopes.single;
+      expect(wire['v'], 1);
+      expect(wire.containsKey('kid'), isFalse);
+      expect(wire['alg'], 'RSA-OAEP-2048-SHA256+AES-256-GCM');
     });
 
     test('has no interceptors of its own (C18)', () {
@@ -187,6 +201,59 @@ void main() {
         expect(outcome, isA<IngestServerError>());
       });
     }
+
+    test(
+      'L7: a 401/403 is the ingest server\'s only with a JSON body',
+      () async {
+        Future<IngestUnauthorized> answer(
+          int status,
+          String body,
+          String type,
+        ) async {
+          final adapter = FakeHttpClientAdapter()
+            ..enqueue(
+              FakeResponse(
+                status,
+                body: body,
+                headers: {
+                  'content-type': [type],
+                },
+              ),
+            );
+          return await _transport(adapter).send([makeEnvelope()])
+              as IngestUnauthorized;
+        }
+
+        expect(
+          (await answer(
+            401,
+            '{"error":"invalid_api_key"}',
+            'application/json',
+          )).fromIngestServer,
+          isTrue,
+        );
+        expect(
+          (await answer(
+            403,
+            '<html>Sign in to Wi-Fi</html>',
+            'text/html',
+          )).fromIngestServer,
+          isFalse,
+        );
+        expect(
+          (await answer(401, '', 'application/json')).fromIngestServer,
+          isFalse,
+        );
+        expect(
+          (await answer(401, '["x"]', 'application/json')).fromIngestServer,
+          isFalse,
+        );
+        expect(
+          (await answer(401, '{"a":1}', 'text/plain')).fromIngestServer,
+          isFalse,
+        );
+      },
+    );
 
     test('statuses map to outcomes', () async {
       Future<IngestOutcome> run(int status) async {
@@ -362,5 +429,89 @@ void main() {
       '${watch.elapsedMilliseconds} ms',
     );
     expect(watch.elapsedMilliseconds, lessThan(5000));
+  });
+
+  group('M2: app attestation header', () {
+    IngestTransport withProvider(
+      FakeHttpClientAdapter adapter,
+      Future<String?> Function() provider, {
+      Duration timeout = const Duration(seconds: 30),
+    }) => IngestTransport(
+      baseUrl: 'https://logs.example.com',
+      apiKey: _apiKey,
+      timeout: timeout,
+      adapter: adapter,
+      clock: FakeClock(DateTime.utc(2026, 6, 1, 12)),
+      attestationTokenProvider: provider,
+    );
+
+    test('no provider: no attestation header', () async {
+      final adapter = FakeHttpClientAdapter();
+      await _transport(adapter).send([makeEnvelope()]);
+      expect(
+        adapter.requests.single.header(IngestTransport.attestationHeader),
+        isNull,
+      );
+    });
+
+    test('the token is sent as X-SealedTrace-Attestation', () async {
+      final adapter = FakeHttpClientAdapter();
+      var calls = 0;
+      await withProvider(adapter, () async {
+        calls++;
+        return 'attest-token-1';
+      }).send([makeEnvelope()]);
+      expect(calls, 1);
+      final request = adapter.requests.single;
+      expect(request.header('X-SealedTrace-Attestation'), 'attest-token-1');
+      expect(request.header('X-Api-Key'), _apiKey);
+    });
+
+    test('the provider is asked again for every request', () async {
+      final adapter = FakeHttpClientAdapter();
+      var n = 0;
+      final transport = withProvider(adapter, () async => 't${++n}');
+      await transport.send([makeEnvelope()]);
+      await transport.send([makeEnvelope()]);
+      expect(
+        adapter.requests.map(
+          (r) => r.header(IngestTransport.attestationHeader),
+        ),
+        ['t1', 't2'],
+      );
+    });
+
+    for (final entry in <String, Future<String?> Function()>{
+      'null': () async => null,
+      'empty': () async => '',
+      'a line break': () async => 'tok\r\nX-Evil: 1',
+      'a throw': () async => throw StateError('secret-detail-xyz'),
+    }.entries) {
+      test('${entry.key}: nothing is sent', () async {
+        final adapter = FakeHttpClientAdapter();
+        final outcome = await withProvider(
+          adapter,
+          entry.value,
+        ).send([makeEnvelope()]);
+        expect(outcome, isA<IngestAttestationUnavailable>());
+        expect(adapter.requests, isEmpty);
+        expect(outcome.toString(), isNot(contains('secret-detail-xyz')));
+      });
+    }
+
+    test('a provider that never answers times out; nothing is sent', () {
+      fakeAsync((async) {
+        final adapter = FakeHttpClientAdapter();
+        IngestOutcome? outcome;
+        withProvider(
+          adapter,
+          () => Completer<String?>().future,
+          timeout: const Duration(seconds: 2),
+        ).send([makeEnvelope()]).then((o) => outcome = o);
+        async.elapse(const Duration(seconds: 3));
+        expect(outcome, isA<IngestAttestationUnavailable>());
+        expect(adapter.requests, isEmpty);
+      });
+    });
   });
 }

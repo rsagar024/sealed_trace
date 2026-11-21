@@ -15,14 +15,16 @@ On start the screen logs one batch and flushes it, so it works without taps.
 
 ## 📖 Quick start
 
-1. Add the dependency:
+1. Create an account at [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org), create a project, and copy its
+   project id, API key and public key ([how](https://github.com/rsagar024/sealed_trace#getting-your-keys)).
+2. Add the dependency:
    ```yaml
    dependencies:
      sealed_trace: ^1.0.0
    ```
-2. Do the [platform setup](https://github.com/rsagar024/sealed_trace#platform-setup): Android permissions, the macOS entitlement, and CORS on your server for
+3. Do the [platform setup](https://github.com/rsagar024/sealed_trace#platform-setup): Android permissions, the macOS entitlement, and CORS on your server for
    the web.
-3. At startup, listen for problems, then initialize:
+4. At startup, listen for problems, then initialize with the values from step 1:
    ```dart
    Future<void> main() async {
      WidgetsFlutterBinding.ensureInitialized();
@@ -30,9 +32,9 @@ On start the screen logs one batch and flushes it, so it works without taps.
        // The SDK never throws into your app; problems are reported here.
      };
      await SealedTrace.init(const SealedTraceConfig(
-       baseUrl: 'https://logs.example.com',
+       baseUrl: 'https://sealedtrace.duckdns.org',
        projectId: 'my-project',
-       apiKey: 'sk_live_…',
+       apiKey: 'pk_live_…', // publishable: identifies the project, not a secret
        publicKeyPem: projectPublicKeyPem,
        appName: 'shop',
        env: SealedTraceEnv.prod,
@@ -41,7 +43,7 @@ On start the screen logs one batch and flushes it, so it works without taps.
      runApp(const MyApp());
    }
    ```
-4. **Required:** attach the user and the device, right after `init`:
+5. **Required:** attach the user and the device, right after `init`:
    ```dart
    SealedTrace.setUser('<user id>', name: '<user name>');      // id: opaque, never an email; name: see below
    SealedTrace.setContext({
@@ -50,8 +52,8 @@ On start the screen logs one batch and flushes it, so it works without taps.
    });
    ```
    The `name` is trimmed, cut to 256 characters and sent as given in `ctx.userName` (plus `ctx.userDisplayName`
-   for the console's Users tab), so the console shows who each user is in the Users tab, the log list and log
-   detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
+   for the console's Users tab when `sendUserDisplayName: true`), so the console shows who each user is in the
+   log list and log detail. It travels only inside the sealed envelope. Pass a name only if the server may see it, or set
    `MaskConfig(maskUserName: true)` to send `***` in `ctx.userName` instead. `setUser(null)` clears both.
 
    The console's device card reads these keys, read with
@@ -66,7 +68,7 @@ On start the screen logs one batch and flushes it, so it works without taps.
      and its values win over `setContext`.
    - Call both after `await SealedTrace.init(...)`. Before init they do nothing.
    - See `_deviceContext()` in [`lib/main.dart`](lib/main.dart) for the full code.
-5. Log anywhere. Every call returns at once and never throws:
+6. Log anywhere. Every call returns at once and never throws:
    ```dart
    SealedTrace.v('cache', 'hit', meta: {'key': 'home'});
    SealedTrace.d('cache', 'miss');
@@ -78,19 +80,21 @@ On start the screen logs one batch and flushes it, so it works without taps.
 
 ## Run this example
 
-1. Open `lib/main.dart` and replace the placeholders with your project's
-   values from the SealedTrace console:
+1. Create an account at [sealedtrace.duckdns.org](https://sealedtrace.duckdns.org)
+   and create a project. Then open `lib/main.dart` and replace the
+   placeholders with the project's values:
 
    | Placeholder | Where it comes from |
    |---|---|
-   | `baseUrl` | your SealedTrace server |
-   | `projectId` | console, project settings |
-   | `projectPublicKeyPem` | console, project encryption key (the **public** key) |
+   | `baseUrl` | already `https://sealedtrace.duckdns.org`; change it only if you run your own server |
+   | `projectId` | [console](https://sealedtrace.duckdns.org), project settings |
+   | `projectPublicKeyPem` | [console](https://sealedtrace.duckdns.org), project encryption key (the **public** key) |
 
 2. **Required:** `main()` attaches the user and the device right after
-   `init` (Quick start step 4); see `_deviceContext()` in `lib/main.dart`.
+   `init` (Quick start step 5); see `_deviceContext()` in `lib/main.dart`.
 
-3. Run with your environment's API key. It is passed with `--dart-define` so
+3. Run with your environment's API key, copied from the project's environment
+   in the [console](https://sealedtrace.duckdns.org). It is passed with `--dart-define` so
    it never lands in source control:
 
    ```sh

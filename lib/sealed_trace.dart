@@ -3,11 +3,14 @@
 /// Logs are masked, sealed with hybrid encryption that only the SealedTrace
 /// server can open, stored offline and uploaded reliably.
 ///
+/// Create an account and a project at https://sealedtrace.duckdns.org to get
+/// the project id, API key and public key.
+///
 /// ```dart
 /// await SealedTrace.init(const SealedTraceConfig(
-///   baseUrl: 'https://logs.example.com',
+///   baseUrl: 'https://sealedtrace.duckdns.org',
 ///   projectId: 'my-project',
-///   apiKey: 'sk_live_…',
+///   apiKey: 'pk_live_…',
 ///   publicKeyPem: projectPublicKeyPem,
 ///   appName: 'shop',
 /// ));
