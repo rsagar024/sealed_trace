@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../model/sealed_envelope.dart' show supportedRsaModulusBits;
 import 'der.dart';
 
 /// The modulus and public exponent of an RSA public key.
@@ -18,11 +19,11 @@ class RsaPublicKeyData {
 /// Parses the project's RSA public key from PEM.
 ///
 /// Accepts SPKI (`BEGIN PUBLIC KEY`) and PKCS#1 (`BEGIN RSA PUBLIC KEY`).
-/// Only 2048-bit keys are accepted, because the envelope algorithm is fixed to
-/// RSA-OAEP-2048.
+/// Keys of 2048, 3072 or 4096 bits are accepted (I3); the envelope's `alg`
+/// names the size.
 abstract final class PublicKeyParser {
-  /// The required modulus size in bits.
-  static const int requiredModulusBits = 2048;
+  /// The accepted modulus sizes in bits.
+  static const Set<int> allowedModulusBits = supportedRsaModulusBits;
 
   // DER content of the rsaEncryption OID 1.2.840.113549.1.1.1.
   static const List<int> _rsaEncryptionOid = <int>[
@@ -97,9 +98,9 @@ abstract final class PublicKeyParser {
   }
 
   static void _validate(RsaPublicKeyData key) {
-    if (key.modulus.bitLength != requiredModulusBits) {
+    if (!allowedModulusBits.contains(key.modulus.bitLength)) {
       throw FormatException(
-        'RSA key must be $requiredModulusBits bits, '
+        'RSA key must be 2048, 3072 or 4096 bits, '
         'got ${key.modulus.bitLength}',
       );
     }

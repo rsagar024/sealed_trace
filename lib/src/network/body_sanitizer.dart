@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 
 import '../masking/masking_engine.dart';
 
@@ -22,11 +24,12 @@ class BodySanitizer {
   /// Characters kept per body, before the truncation marker.
   final int maxBodyChars;
 
-  /// Bodies larger than this are not processed at all.
-  static const int maxCaptureChars = 1000000;
+  /// Bodies larger than this are not processed at all. Bounds the parsing
+  /// and masking work one hostile or huge response can cause.
+  static const int maxCaptureChars = 256 * 1024;
 
   /// Structured bodies with more nodes than this are not processed.
-  static const int maxCaptureNodes = 200000;
+  static const int maxCaptureNodes = 50000;
 
   /// Content types that are never text.
   static final RegExp _binaryType = RegExp(
@@ -35,22 +38,97 @@ class BodySanitizer {
     r'vnd\.openxmlformats|msword|wasm)',
   );
 
+  /// Text bodies at least this long are sanitized off the UI isolate.
+  static const int offloadChars = 32 * 1024;
+
+  /// Structured bodies with more nodes than this are sanitized off the UI
+  /// isolate.
+  static const int offloadNodes = 2000;
+
   /// Sanitizes the body of [options].
-  String? sanitizeRequest(RequestOptions options) => sanitize(
-    options.data,
-    contentType:
-        options.contentType ??
-        _headerValue(options.headers, Headers.contentTypeHeader),
-  );
+  String? sanitizeRequest(RequestOptions options) =>
+      sanitize(options.data, contentType: _requestType(options));
 
   /// Sanitizes the body of [response].
   String? sanitizeResponse(Response<dynamic> response) => sanitize(
     response.data,
     contentType: response.headers.value(Headers.contentTypeHeader),
-    declaredLength: int.tryParse(
-      response.headers.value(Headers.contentLengthHeader) ?? '',
-    ),
+    declaredLength: _declaredLength(response),
   );
+
+  /// Like [sanitizeRequest], but see [sanitizeOffloaded].
+  FutureOr<String?> sanitizeRequestOffloaded(RequestOptions options) =>
+      sanitizeOffloaded(options.data, contentType: _requestType(options));
+
+  /// Like [sanitizeResponse], but see [sanitizeOffloaded].
+  FutureOr<String?> sanitizeResponseOffloaded(Response<dynamic> response) =>
+      sanitizeOffloaded(
+        response.data,
+        contentType: response.headers.value(Headers.contentTypeHeader),
+        declaredLength: _declaredLength(response),
+      );
+
+  /// Like [sanitize], but a large body (at least [offloadChars] of text, or
+  /// more than [offloadNodes] structured nodes) is parsed and masked in a
+  /// background isolate on native platforms, so a hostile or huge response
+  /// cannot stall the UI. Small bodies, and every body on the web, are
+  /// sanitized synchronously and returned as a plain value.
+  ///
+  /// The isolate uses a snapshot of the engine, so keys and patterns added at
+  /// runtime apply. If the body cannot be sent to an isolate, it is
+  /// sanitized here instead. Never throws.
+  FutureOr<String?> sanitizeOffloaded(
+    Object? data, {
+    String? contentType,
+    int? declaredLength,
+  }) {
+    if (kIsWeb || !_worthOffloading(data, declaredLength)) {
+      return sanitize(
+        data,
+        contentType: contentType,
+        declaredLength: declaredLength,
+      );
+    }
+    final job = SanitizeJob(
+      engine.snapshot(),
+      maxBodyChars,
+      data,
+      contentType,
+      declaredLength,
+    );
+    return compute(sanitizeInIsolate, job).then<String?>(
+      (value) => value,
+      onError: (Object _) => sanitize(
+        data,
+        contentType: contentType,
+        declaredLength: declaredLength,
+      ),
+    );
+  }
+
+  bool _worthOffloading(Object? data, int? declaredLength) {
+    try {
+      if (data == null) return false;
+      if (declaredLength != null && declaredLength > maxCaptureChars) {
+        return false; // Becomes a placeholder at no cost.
+      }
+      if (data is String) {
+        return data.length >= offloadChars && data.length <= maxCaptureChars;
+      }
+      if (data is Uint8List || data is List<int>) return false;
+      if (data is Map || data is Iterable) return _exceeds(data, offloadNodes);
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static String? _requestType(RequestOptions options) =>
+      options.contentType ??
+      _headerValue(options.headers, Headers.contentTypeHeader);
+
+  static int? _declaredLength(Response<dynamic> response) =>
+      int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '');
 
   /// Sanitizes [data], or returns null when there is no body.
   String? sanitize(Object? data, {String? contentType, int? declaredLength}) {
@@ -105,7 +183,7 @@ class BodySanitizer {
     if (contentType != null && contentType.contains('x-www-form-urlencoded')) {
       return _truncate(engine.maskQueryString(text));
     }
-    return _truncate(_credentialPass(engine.maskString(text)));
+    return _truncate(_schemePass(engine.maskString(text)));
   }
 
   String _sanitizeStructure(Object data) {
@@ -158,84 +236,57 @@ class BodySanitizer {
 
   // ---- credentials in free text ----
 
-  /// Header names that can show up as `name: value` inside text bodies, in
-  /// addition to the engine's sensitive keys.
-  static const List<String> _extraTextKeys = <String>[
-    'authorization',
-    'proxy-authorization',
-    'cookie',
-    'set-cookie',
-    'x-api-key',
-  ];
-
-  static const Set<String> _schemeWords = <String>{
-    'bearer',
-    'basic',
-    'digest',
-    'negotiate',
-    'ntlm',
-  };
-
   static final RegExp _scheme = RegExp(
     r'\b(Bearer|Basic|Digest|Negotiate|NTLM)(\s+)[A-Za-z0-9._~+/=\-]{6,2000}',
     caseSensitive: false,
   );
 
-  // A cookie line holds several pairs, so everything after the colon goes.
-  static final RegExp _cookieLine = RegExp(
-    r'(\b(?:cookie|set-cookie)\s*:\s*)[^\r\n]{1,2000}',
-    caseSensitive: false,
+  /// Masks scheme tokens such as `Basic abc` in text bodies. Key-value pairs
+  /// (`token=...`, `"password": ...`, `<idToken>...`) are already masked by
+  /// `MaskingEngine.maskString`, which applies them to every string. `Basic`
+  /// and the other schemes are matched here only, not in log messages, where
+  /// "Basic setup" is ordinary text.
+  String _schemePass(String text) => text.replaceAllMapped(
+    _scheme,
+    (m) => '${m[1]}${m[2]}${engine.replacement}',
+  );
+}
+
+/// One body to sanitize in a background isolate. Plain, sendable data.
+class SanitizeJob {
+  /// Creates a job.
+  const SanitizeJob(
+    this.snapshot,
+    this.maxBodyChars,
+    this.data,
+    this.contentType,
+    this.declaredLength,
   );
 
-  static String _keysCache = '';
-  static RegExp? _jsonPair;
-  static RegExp? _xmlPair;
-  static RegExp? _plainPair;
+  /// The masking rules to apply.
+  final MaskingSnapshot snapshot;
 
-  /// Masks credentials that the pattern pass cannot see: scheme tokens such as
-  /// `Bearer abc`, and `key=value`, `key: value`, `"key": "value"` and
-  /// `<key>value</key>` forms for every sensitive key.
-  String _credentialPass(String text) {
-    var out = text.replaceAllMapped(_scheme, (m) => '${m[1]}${m[2]}***');
-    out = out.replaceAllMapped(_cookieLine, (m) => '${m[1]}***');
+  /// Characters kept per body.
+  final int maxBodyChars;
 
-    final keys = <String>{...engine.sensitiveKeys, ..._extraTextKeys}.toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
-    if (keys.isEmpty) return out;
-    final signature = keys.join('|');
-    if (signature != _keysCache) {
-      final alternation = keys.map(RegExp.escape).join('|');
-      _jsonPair = RegExp(
-        '("(?:$alternation)"\\s*:\\s*)'
-        r'("(?:[^"\\]|\\.){0,2000}"|[^\s,}\]]{1,500})',
-        caseSensitive: false,
-      );
-      _xmlPair = RegExp(
-        '(<(?:$alternation)(?:\\s[^>]{0,200})?>)([^<]{0,2000})'
-        '(</(?:$alternation)>)',
-        caseSensitive: false,
-      );
-      _plainPair = RegExp(
-        '(\\b(?:$alternation)["\']?\\s{0,5}[=:]\\s{0,5}["\']?)'
-        '([^\\s&,;"\'<>{}\\[\\]]{1,500})',
-        caseSensitive: false,
-      );
-      _keysCache = signature;
-    }
-    out = out.replaceAllMapped(
-      _jsonPair!,
-      (m) => '${m[1]}"${engine.replacement}"',
-    );
-    out = out.replaceAllMapped(
-      _xmlPair!,
-      (m) => '${m[1]}${engine.replacement}${m[3]}',
-    );
-    out = out.replaceAllMapped(_plainPair!, (m) {
-      // "Authorization: Bearer ***": keep the scheme word, the scheme pass
-      // already masked the token after it.
-      if (_schemeWords.contains(m[2]!.toLowerCase())) return m[0]!;
-      return '${m[1]}${engine.replacement}';
-    });
-    return out;
-  }
+  /// The body: a string, or a JSON-like map or list.
+  final Object? data;
+
+  /// The body's content type, lower-cased or null.
+  final String? contentType;
+
+  /// The declared `Content-Length`, if any.
+  final int? declaredLength;
 }
+
+/// Sanitizes [job] with an engine rebuilt from its snapshot. A top-level
+/// function so it can run in a background isolate.
+String? sanitizeInIsolate(SanitizeJob job) =>
+    BodySanitizer(
+      MaskingEngine.fromSnapshot(job.snapshot),
+      maxBodyChars: job.maxBodyChars,
+    ).sanitize(
+      job.data,
+      contentType: job.contentType,
+      declaredLength: job.declaredLength,
+    );

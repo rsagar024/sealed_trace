@@ -14,3 +14,6 @@ Future<StorageAdapter> openPlatformStorage({
   );
   return MemoryStorageAdapter();
 }
+
+/// There are no database files here, so nothing to delete.
+Future<int> deleteCorruptDatabaseCopies({String? databaseDirectory}) async => 0;

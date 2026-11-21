@@ -81,4 +81,19 @@ void main() {
       },
     );
   });
+
+  test('M2: attestationTokenProvider defaults to null, survives copyWith '
+      'and is compared by identity', () {
+    Future<String?> a() async => 'a';
+    Future<String?> b() async => 'b';
+    expect(const UploadConfig().attestationTokenProvider, isNull);
+    final c = UploadConfig(attestationTokenProvider: a);
+    expect(
+      identical(c.copyWith(batchSize: 10).attestationTokenProvider, a),
+      isTrue,
+    );
+    expect(c, UploadConfig(attestationTokenProvider: a));
+    expect(c, isNot(UploadConfig(attestationTokenProvider: b)));
+    expect(c, isNot(const UploadConfig()));
+  });
 }

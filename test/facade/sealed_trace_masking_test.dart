@@ -67,8 +67,9 @@ void main() {
     expect(record.metadata['password'], '***');
     expect((record.metadata['profile'] as Map)['email'], '***');
     expect((record.metadata['profile'] as Map)['city'], 'Pune');
+    // By default setUser's name is sent as given; userDisplayName is not sent.
     expect(record.ctx['userName'], 'Asha Rao');
-    expect(record.ctx['userDisplayName'], 'Asha Rao');
+    expect(record.ctx.containsKey('userDisplayName'), isFalse);
     expect(record.ctx['contact'], '***');
     expect(record.userId, 'user-42');
 
@@ -127,12 +128,12 @@ void main() {
 
   test('addMaskKeys applies to later events only', () async {
     await _init();
-    SealedTrace.i('t', 'before', meta: {'iban': 'GB00'});
-    SealedTrace.addMaskKeys(['IBAN']);
-    SealedTrace.i('t', 'after', meta: {'iban': 'GB00'});
+    SealedTrace.i('t', 'before', meta: {'memberNo': 'M-77'});
+    SealedTrace.addMaskKeys(['MEMBER_NO']);
+    SealedTrace.i('t', 'after', meta: {'memberNo': 'M-77'});
     await SealedTrace.flush();
-    expect(sink.records[0].metadata, {'iban': 'GB00'});
-    expect(sink.records[1].metadata, {'iban': '***'});
+    expect(sink.records[0].metadata, {'memberNo': 'M-77'});
+    expect(sink.records[1].metadata, {'memberNo': '***'});
   });
 
   test('addMaskPattern applies to later events', () async {
@@ -157,6 +158,40 @@ void main() {
       expect(sink.records.single.message, 'abc');
     },
   );
+
+  test(
+    'L13: an unsafe pattern is reported with its reason and ignored',
+    () async {
+      final errors = <Object>[];
+      SealedTrace.onException = (e, _) => errors.add(e);
+      await _init();
+      SealedTrace.addMaskPattern(RegExp(r'(a+)+$'));
+      expect(errors, hasLength(1));
+      final error = errors.single as ArgumentError;
+      expect(error.invalidValue, r'(a+)+$');
+      expect(error.message, contains('nested repetition'));
+
+      final watch = Stopwatch()..start();
+      final evil = '${'a' * 40}!';
+      SealedTrace.i('t', evil);
+      await SealedTrace.flush();
+      expect(watch.elapsedMilliseconds, lessThan(2000));
+      expect(sink.records.single.message, evil);
+    },
+  );
+
+  test('L13: an unsafe config pattern is reported at init', () async {
+    final errors = <Object>[];
+    SealedTrace.onException = (e, _) => errors.add(e);
+    await _init(
+      _config.copyWith(
+        maskConfig: MaskConfig(extraPatterns: [RegExp(r'(x|xy)*z')]),
+      ),
+    );
+    expect(errors.whereType<ArgumentError>().map((e) => '${e.message}'), [
+      contains('repeated alternation'),
+    ]);
+  });
 
   test('masking does not change ids, sequence or timestamps', () async {
     await _init();

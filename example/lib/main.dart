@@ -1,7 +1,7 @@
 // A live example of the sealed_trace SDK.
 //
-// 1. Replace the placeholders below with your project's values from the
-//    SealedTrace console.
+// 1. Create an account at https://sealedtrace.duckdns.org, create a project,
+//    and replace the placeholders below with its values.
 // 2. Run with your environment's API key:
 //
 //      flutter run --dart-define=SEALED_TRACE_API_KEY=<your-api-key>
@@ -22,8 +22,8 @@ import 'package:sealed_trace/sealed_trace.dart';
 // Placeholders: replace with your project's values.
 // ---------------------------------------------------------------------------
 
-/// Your SealedTrace server.
-const baseUrl = 'https://YOUR-SEALEDTRACE-SERVER';
+/// The hosted SealedTrace server (change it only if you run your own).
+const baseUrl = 'https://sealedtrace.duckdns.org';
 
 /// Project id, from the console's project settings.
 const projectId = 'YOUR_PROJECT_ID';
@@ -74,7 +74,9 @@ Future<void> main() async {
   );
   debugPrint('example: init: ${SealedTrace.isInitialized}');
 
-  // User and device info, attached to every later event.
+  // User and device info, attached to every later event. The id and name
+  // are sent unmasked; set MaskConfig(maskUserName: true) to send *** instead.
+  // sendUserDisplayName: true also fills the console's Users tab.
   SealedTrace.setUser('demo-user', name: 'Demo User');
   SealedTrace.setContext(await _deviceContext());
 
@@ -94,13 +96,21 @@ Future<Map<String, dynamic>> _deviceContext() async {
         : Platform.operatingSystem,
   };
   try {
+    // Identifiers are sent as SealedTrace.pseudonym(...), never raw (L12):
+    // events still group by device, but the identifier stays on the device.
     if (!kIsWeb && Platform.isAndroid) {
       final a = await DeviceInfoPlugin().androidInfo;
-      device['deviceId'] = a.id; // e.g. BE2A.250530.026.F3
+      // `id` is Build.ID, the build identifier (e.g. BE2A.250530.026.F3),
+      // shared by every device on that build: it does not identify one
+      // device. For a real per-device id, store a random UUID per install
+      // (for example with shared_preferences) and pass that instead.
+      final id = SealedTrace.pseudonym(a.id);
+      if (id != null) device['deviceId'] = id;
       device['deviceModel'] = a.model; // e.g. Pixel 8
     } else if (!kIsWeb && Platform.isIOS) {
       final i = await DeviceInfoPlugin().iosInfo;
-      final id = i.identifierForVendor;
+      final vendorId = i.identifierForVendor;
+      final id = vendorId == null ? null : SealedTrace.pseudonym(vendorId);
       if (id != null) device['deviceId'] = id;
       device['deviceModel'] = i.modelName; // e.g. iPhone 15 Pro
     }

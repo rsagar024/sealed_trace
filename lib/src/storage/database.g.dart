@@ -197,6 +197,15 @@ class $SealedEnvelopesTable extends SealedEnvelopes
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _kidMeta = const VerificationMeta('kid');
+  @override
+  late final GeneratedColumn<String> kid = GeneratedColumn<String>(
+    'kid',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     batchId,
@@ -217,6 +226,7 @@ class $SealedEnvelopesTable extends SealedEnvelopes
     maxTs,
     topLevels,
     uploadedAt,
+    kid,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -372,6 +382,12 @@ class $SealedEnvelopesTable extends SealedEnvelopes
         uploadedAt.isAcceptableOrUnknown(data['uploaded_at']!, _uploadedAtMeta),
       );
     }
+    if (data.containsKey('kid')) {
+      context.handle(
+        _kidMeta,
+        kid.isAcceptableOrUnknown(data['kid']!, _kidMeta),
+      );
+    }
     return context;
   }
 
@@ -453,6 +469,10 @@ class $SealedEnvelopesTable extends SealedEnvelopes
         DriftSqlType.int,
         data['${effectivePrefix}uploaded_at'],
       ),
+      kid: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kid'],
+      ),
     );
   }
 
@@ -516,6 +536,10 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
 
   /// Set once the server acknowledged the batch, until the row is deleted.
   final int? uploadedAt;
+
+  /// Identifier of the project key the batch was sealed to (I3, schema 2).
+  /// Null for rows sealed by a schema-1 build, which are sent as v2.
+  final String? kid;
   const EnvelopeRecord({
     required this.batchId,
     required this.projectId,
@@ -535,6 +559,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
     required this.maxTs,
     required this.topLevels,
     this.uploadedAt,
+    this.kid,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -560,6 +585,9 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
     map['top_levels'] = Variable<String>(topLevels);
     if (!nullToAbsent || uploadedAt != null) {
       map['uploaded_at'] = Variable<int>(uploadedAt);
+    }
+    if (!nullToAbsent || kid != null) {
+      map['kid'] = Variable<String>(kid);
     }
     return map;
   }
@@ -588,6 +616,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
       uploadedAt: uploadedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(uploadedAt),
+      kid: kid == null && nullToAbsent ? const Value.absent() : Value(kid),
     );
   }
 
@@ -615,6 +644,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
       maxTs: serializer.fromJson<int>(json['maxTs']),
       topLevels: serializer.fromJson<String>(json['topLevels']),
       uploadedAt: serializer.fromJson<int?>(json['uploadedAt']),
+      kid: serializer.fromJson<String?>(json['kid']),
     );
   }
   @override
@@ -639,6 +669,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
       'maxTs': serializer.toJson<int>(maxTs),
       'topLevels': serializer.toJson<String>(topLevels),
       'uploadedAt': serializer.toJson<int?>(uploadedAt),
+      'kid': serializer.toJson<String?>(kid),
     };
   }
 
@@ -661,6 +692,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
     int? maxTs,
     String? topLevels,
     Value<int?> uploadedAt = const Value.absent(),
+    Value<String?> kid = const Value.absent(),
   }) => EnvelopeRecord(
     batchId: batchId ?? this.batchId,
     projectId: projectId ?? this.projectId,
@@ -682,6 +714,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
     maxTs: maxTs ?? this.maxTs,
     topLevels: topLevels ?? this.topLevels,
     uploadedAt: uploadedAt.present ? uploadedAt.value : this.uploadedAt,
+    kid: kid.present ? kid.value : this.kid,
   );
   EnvelopeRecord copyWithCompanion(SealedEnvelopesCompanion data) {
     return EnvelopeRecord(
@@ -717,6 +750,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
       uploadedAt: data.uploadedAt.present
           ? data.uploadedAt.value
           : this.uploadedAt,
+      kid: data.kid.present ? data.kid.value : this.kid,
     );
   }
 
@@ -740,7 +774,8 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
           ..write('minTs: $minTs, ')
           ..write('maxTs: $maxTs, ')
           ..write('topLevels: $topLevels, ')
-          ..write('uploadedAt: $uploadedAt')
+          ..write('uploadedAt: $uploadedAt, ')
+          ..write('kid: $kid')
           ..write(')'))
         .toString();
   }
@@ -765,6 +800,7 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
     maxTs,
     topLevels,
     uploadedAt,
+    kid,
   );
   @override
   bool operator ==(Object other) =>
@@ -787,7 +823,8 @@ class EnvelopeRecord extends DataClass implements Insertable<EnvelopeRecord> {
           other.minTs == this.minTs &&
           other.maxTs == this.maxTs &&
           other.topLevels == this.topLevels &&
-          other.uploadedAt == this.uploadedAt);
+          other.uploadedAt == this.uploadedAt &&
+          other.kid == this.kid);
 }
 
 class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
@@ -809,6 +846,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
   final Value<int> maxTs;
   final Value<String> topLevels;
   final Value<int?> uploadedAt;
+  final Value<String?> kid;
   final Value<int> rowid;
   const SealedEnvelopesCompanion({
     this.batchId = const Value.absent(),
@@ -829,6 +867,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
     this.maxTs = const Value.absent(),
     this.topLevels = const Value.absent(),
     this.uploadedAt = const Value.absent(),
+    this.kid = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SealedEnvelopesCompanion.insert({
@@ -850,6 +889,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
     required int maxTs,
     required String topLevels,
     this.uploadedAt = const Value.absent(),
+    this.kid = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : batchId = Value(batchId),
        projectId = Value(projectId),
@@ -884,6 +924,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
     Expression<int>? maxTs,
     Expression<String>? topLevels,
     Expression<int>? uploadedAt,
+    Expression<String>? kid,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -905,6 +946,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
       if (maxTs != null) 'max_ts': maxTs,
       if (topLevels != null) 'top_levels': topLevels,
       if (uploadedAt != null) 'uploaded_at': uploadedAt,
+      if (kid != null) 'kid': kid,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -928,6 +970,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
     Value<int>? maxTs,
     Value<String>? topLevels,
     Value<int?>? uploadedAt,
+    Value<String?>? kid,
     Value<int>? rowid,
   }) {
     return SealedEnvelopesCompanion(
@@ -949,6 +992,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
       maxTs: maxTs ?? this.maxTs,
       topLevels: topLevels ?? this.topLevels,
       uploadedAt: uploadedAt ?? this.uploadedAt,
+      kid: kid ?? this.kid,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1010,6 +1054,9 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
     if (uploadedAt.present) {
       map['uploaded_at'] = Variable<int>(uploadedAt.value);
     }
+    if (kid.present) {
+      map['kid'] = Variable<String>(kid.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1037,6 +1084,7 @@ class SealedEnvelopesCompanion extends UpdateCompanion<EnvelopeRecord> {
           ..write('maxTs: $maxTs, ')
           ..write('topLevels: $topLevels, ')
           ..write('uploadedAt: $uploadedAt, ')
+          ..write('kid: $kid, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1306,6 +1354,7 @@ typedef $$SealedEnvelopesTableCreateCompanionBuilder =
       required int maxTs,
       required String topLevels,
       Value<int?> uploadedAt,
+      Value<String?> kid,
       Value<int> rowid,
     });
 typedef $$SealedEnvelopesTableUpdateCompanionBuilder =
@@ -1328,6 +1377,7 @@ typedef $$SealedEnvelopesTableUpdateCompanionBuilder =
       Value<int> maxTs,
       Value<String> topLevels,
       Value<int?> uploadedAt,
+      Value<String?> kid,
       Value<int> rowid,
     });
 
@@ -1427,6 +1477,11 @@ class $$SealedEnvelopesTableFilterComposer
 
   ColumnFilters<int> get uploadedAt => $composableBuilder(
     column: $table.uploadedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kid => $composableBuilder(
+    column: $table.kid,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -1529,6 +1584,11 @@ class $$SealedEnvelopesTableOrderingComposer
     column: $table.uploadedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get kid => $composableBuilder(
+    column: $table.kid,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$SealedEnvelopesTableAnnotationComposer
@@ -1607,6 +1667,9 @@ class $$SealedEnvelopesTableAnnotationComposer
     column: $table.uploadedAt,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get kid =>
+      $composableBuilder(column: $table.kid, builder: (column) => column);
 }
 
 class $$SealedEnvelopesTableTableManager
@@ -1664,6 +1727,7 @@ class $$SealedEnvelopesTableTableManager
                 Value<int> maxTs = const Value.absent(),
                 Value<String> topLevels = const Value.absent(),
                 Value<int?> uploadedAt = const Value.absent(),
+                Value<String?> kid = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SealedEnvelopesCompanion(
                 batchId: batchId,
@@ -1684,6 +1748,7 @@ class $$SealedEnvelopesTableTableManager
                 maxTs: maxTs,
                 topLevels: topLevels,
                 uploadedAt: uploadedAt,
+                kid: kid,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -1706,6 +1771,7 @@ class $$SealedEnvelopesTableTableManager
                 required int maxTs,
                 required String topLevels,
                 Value<int?> uploadedAt = const Value.absent(),
+                Value<String?> kid = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SealedEnvelopesCompanion.insert(
                 batchId: batchId,
@@ -1726,6 +1792,7 @@ class $$SealedEnvelopesTableTableManager
                 maxTs: maxTs,
                 topLevels: topLevels,
                 uploadedAt: uploadedAt,
+                kid: kid,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

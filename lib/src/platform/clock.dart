@@ -4,11 +4,11 @@ abstract interface class Clock {
   DateTime now();
 }
 
-/// A [Clock] backed by the system clock.
+/// A [Clock] backed by the system clock. Always returns UTC.
 class SystemClock implements Clock {
   /// Creates a system clock.
   const SystemClock();
 
   @override
-  DateTime now() => DateTime.now();
+  DateTime now() => DateTime.now().toUtc();
 }

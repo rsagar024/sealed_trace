@@ -15,6 +15,8 @@ SealedEnvelope makeEnvelope({
   int seqMax = 1,
   String topLevels = 'info',
   String projectId = 'project-1',
+  String? kid = 'kid-test-1',
+  int wrappedKeyLength = 256,
 }) {
   _counter++;
   Uint8List fill(int length, int offset) => Uint8List.fromList(
@@ -28,7 +30,7 @@ SealedEnvelope makeEnvelope({
     projectId: projectId,
     createdAt: at,
     eventCount: eventCount,
-    wrappedKey: fill(256, 1),
+    wrappedKey: fill(wrappedKeyLength, 1),
     iv: fill(12, 2),
     tag: fill(16, 3),
     ciphertext: fill(ciphertextLength, 4),
@@ -38,5 +40,6 @@ SealedEnvelope makeEnvelope({
     maxTs: at.millisecondsSinceEpoch + 5,
     topLevels: topLevels,
     payloadSize: ciphertextLength,
+    kid: kid,
   );
 }

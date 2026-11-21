@@ -66,6 +66,10 @@ class SealedEnvelopes extends Table {
   /// Set once the server acknowledged the batch, until the row is deleted.
   IntColumn get uploadedAt => integer().nullable()();
 
+  /// Identifier of the project key the batch was sealed to (I3, schema 2).
+  /// Null for rows sealed by a schema-1 build, which are sent as v2.
+  TextColumn get kid => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {batchId};
 }
@@ -91,13 +95,15 @@ class SealedDatabase extends _$SealedDatabase {
   SealedDatabase(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
-      // Version 1 is the first schema. Additive migrations land here.
+      // 2 (I3): the key id of each envelope. Existing rows keep null and are
+      // sent as v2, exactly as they were sealed.
+      if (from < 2) await m.addColumn(sealedEnvelopes, sealedEnvelopes.kid);
     },
   );
 }

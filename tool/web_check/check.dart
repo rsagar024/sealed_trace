@@ -24,6 +24,9 @@ import 'package:crypto/crypto.dart' show sha256;
 import 'package:web/web.dart' as web;
 
 import 'package:sealed_trace/src/config/mask_config.dart';
+import 'package:sealed_trace/src/crypto/aes_gcm_platform_web.dart';
+import 'package:sealed_trace/src/crypto/crypto_backend.dart';
+import 'package:sealed_trace/src/crypto/der.dart';
 import 'package:sealed_trace/src/crypto/envelope_sealer.dart';
 import 'package:sealed_trace/src/crypto/gcm.dart';
 import 'package:sealed_trace/src/crypto/public_key_parser.dart';
@@ -34,14 +37,17 @@ import 'package:sealed_trace/src/event/sealing_batch_handler.dart';
 import 'package:sealed_trace/src/masking/masking_engine.dart';
 import 'package:sealed_trace/src/model/log_level.dart';
 import 'package:sealed_trace/src/model/sealed_envelope.dart';
+import 'package:sealed_trace/src/platform/device_info_web.dart';
 import 'package:sealed_trace/src/platform/lifecycle_binding.dart';
 import 'package:sealed_trace/src/platform/page_events_web.dart';
 import 'package:sealed_trace/src/queue/write_behind_queue.dart';
 import 'package:sealed_trace/src/storage/envelope_spill.dart';
 import 'package:sealed_trace/src/storage/envelope_store.dart';
 import 'package:sealed_trace/src/storage/indexeddb_storage_adapter.dart';
+import 'package:sealed_trace/src/storage/memory_storage_adapter.dart';
 import 'package:sealed_trace/src/storage/retention_policy.dart';
 import 'package:sealed_trace/src/storage/storage_adapter.dart';
+import 'package:sealed_trace/src/upload/batch_packer.dart';
 
 import '../../test/helpers/test_keys.dart';
 
@@ -73,9 +79,15 @@ const RetentionPolicy _bigPolicy = RetentionPolicy(
   deadLetterTtl: Duration(days: 7),
 );
 
+// The production web backend: every asynchronous seal goes through WebCrypto
+// (M5, L5).
 EnvelopeSealer _sealer() => EnvelopeSealer(
   publicKey: PublicKeyParser.parse(testPublicKeySpki),
   projectId: 'project-web',
+  backend: DefaultCryptoBackend(
+    offload: platformAesGcmOffload(),
+    offloadThresholdBytes: platformOffloadThresholdBytes,
+  ),
 );
 
 LogRecord _record(int seq, {String message = 'event', Object? field}) =>
@@ -133,6 +145,14 @@ Future<void> main() async {
   final phase = params['phase'] ?? 'main';
   emit('PHASE $phase');
   emit('UA ${web.window.navigator.userAgent}');
+  // L12: the SDK reports only "<browser> <major> on <OS>", never the UA.
+  final reportedOs = readPlatformInfo().os;
+  emit('TRACE L12 os: $reportedOs');
+  check(
+    'the web os is coarse, not the user agent (L12)',
+    RegExp(r'^[A-Za-z ]+ \d{1,4} on [A-Za-z]+$').hasMatch(reportedOs) &&
+        !reportedOs.contains('Mozilla'),
+  );
   try {
     switch (phase) {
       case 'main':
@@ -224,10 +244,121 @@ Future<void> _main() async {
     emit('GCM $size ${_hash(ct)} ${base64Encode(tag)}');
   }
 
+  // M5: WebCrypto must produce exactly what the pure-Dart cipher produces,
+  // with and without additional data, or envelopes would not open.
+  for (final size in const [0, 1, 15, 16, 17, 100, 4096, 100000]) {
+    for (final aadLength in const [0, 13, 200]) {
+      final key = Uint8List.fromList(
+        List.generate(32, (i) => (i * 11 + size) & 0xff),
+      );
+      final iv = Uint8List.fromList(
+        List.generate(12, (i) => (i * 3 + aadLength) & 0xff),
+      );
+      final plain = Uint8List.fromList(
+        List.generate(size, (i) => (i * 17 + 3) & 0xff),
+      );
+      final aad = Uint8List.fromList(
+        List.generate(aadLength, (i) => (i * 5 + 1) & 0xff),
+      );
+      final job = AesGcmJob(key, iv, plain, aad);
+      final dart = await runAesGcm(job);
+      var ok = false;
+      try {
+        final native = await webCryptoAesGcm(job);
+        ok =
+            _hash(native.ciphertext) == _hash(dart.ciphertext) &&
+            base64Encode(native.tag) == base64Encode(dart.tag);
+      } catch (error) {
+        emit('TRACE webcrypto $size/$aadLength: $error');
+      }
+      check(
+        'WebCrypto AES-GCM equals pure Dart: $size B, AAD $aadLength B',
+        ok,
+      );
+    }
+  }
+
+  // L6: Padme lengths under dart2js (32-bit bitwise operations) match a
+  // floating-point reference, so web and native pad identically.
+  {
+    var padOk = true;
+    for (var l = 1; l <= 200000 && padOk; l += (l < 70000 ? 1 : 97)) {
+      int reference(int length) {
+        if (length <= 256) return 256;
+        final e = (log(length) / ln2).floor();
+        final s = (log(e) / ln2).floor() + 1;
+        final step = pow(2, e - s).toInt();
+        return (length / step).ceil() * step;
+      }
+
+      if (padmeLength(l) != reference(l)) {
+        emit('TRACE padme $l: ${padmeLength(l)} != ${reference(l)}');
+        padOk = false;
+      }
+    }
+    check('Padme lengths match the reference under dart2js (L6)', padOk);
+  }
+
+  // L9: a huge long-form DER length is a FormatException under dart2js too,
+  // not a negative length and a RangeError.
+  {
+    var derOk = true;
+    for (final bad in [
+      [0x30, 0x84, 0x80, 0x00, 0x00, 0x00],
+      [0x30, 0x84, 0xff, 0xff, 0xff, 0xff],
+      [0x30, 0x83, 0xff, 0xff, 0xff],
+      [0x30, 0x81, 0x05, 0, 0, 0, 0, 0],
+    ]) {
+      try {
+        readDerElement(Uint8List.fromList(bad));
+        derOk = false;
+      } on FormatException {
+        // Expected.
+      } catch (error) {
+        emit('TRACE der $bad: $error');
+        derOk = false;
+      }
+    }
+    check(
+      'malformed DER lengths are FormatExceptions under dart2js (L9)',
+      derOk,
+    );
+  }
+
+  // L11: under dart2js `1 << 40` is 0 (32-bit shifts), so the old upload
+  // bound fetched one envelope per request. The new bound is a plain
+  // constant and fetches the whole batch.
+  {
+    final memory = MemoryStorageAdapter();
+    await memory.open();
+    final candidates = EnvelopeStore(adapter: memory, policy: _bigPolicy);
+    final sealer = _sealer();
+    for (var i = 1; i <= 5; i++) {
+      await candidates.append(await sealer.seal([_record(i)]));
+    }
+    // Computed at run time so dart2js cannot fold it at compile time.
+    final forty = 40 + _out.length * 0;
+    final oldBound = 1 << forty;
+    final oldRows = await candidates.nextPending(limit: 50, maxBytes: oldBound);
+    final newRows = await candidates.nextPending(
+      limit: 50,
+      maxBytes: BatchPacker.maxRequestBytes,
+    );
+    emit(
+      'TRACE L11: 1 << 40 = $oldBound; old bound fetched '
+      '${oldRows.length}, new bound fetched ${newRows.length}',
+    );
+    check(
+      'upload candidates are not limited to one envelope on the web (L11)',
+      newRows.length == 5,
+    );
+  }
+
   // Sealing on the main thread. The queue caps a batch at 25 events and
   // 64 KB unless a single event is larger, so the largest real batches are
   // "25 events filling 64 KB" and "one event at the 128 K cap". The 25 x 128 K
   // case cannot come out of the queue; it is measured as an upper bound.
+  final webCryptoBefore = webCryptoUses;
   final sealer = _sealer();
   final cases = <String, List<LogRecord>>{
     '25 small': [for (var i = 1; i <= 25; i++) _record(i)],
@@ -251,6 +382,15 @@ Future<void> _main() async {
       'ENVELOPE ${jsonEncode({'name': entry.key, 'wire': envelope.toWireJson(), 'plainHash': _hash(utf8.encode(plaintext))})}',
     );
   }
+
+  check(
+    'sealing used WebCrypto with no pure-Dart fallback',
+    webCryptoFallbacks == 0,
+  );
+  check(
+    'every async seal, small ones too, used WebCrypto (L5)',
+    webCryptoUses - webCryptoBefore == cases.length,
+  );
 
   // Masking a worst-case event on the caller's (main) thread.
   final big = {'field': _noise(127000, 9), 'email': 'asha@example.com'};

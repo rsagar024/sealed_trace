@@ -15,6 +15,7 @@ import 'package:sealed_trace/src/crypto/public_key_parser.dart';
 import 'package:sealed_trace/src/crypto/rsa_oaep.dart';
 import 'package:sealed_trace/src/event/log_record.dart';
 import 'package:sealed_trace/src/model/log_level.dart';
+import 'package:sealed_trace/src/model/sealed_envelope.dart';
 import 'package:sealed_trace/src/platform/clock.dart';
 
 import '../../test/helpers/test_keys.dart';
@@ -91,24 +92,82 @@ Future<Map<String, dynamic>> _envelopeCase(
   String name,
   String description,
   List<LogRecord> records,
-  int seed,
-) async {
+  int seed, {
+  String publicKeyPem = testPublicKeySpki,
+}) async {
   final key = _bytes(32, seed, 7);
   final iv = _bytes(12, seed + 1, 13);
   final sealer = EnvelopeSealer(
-    publicKey: PublicKeyParser.parse(testPublicKeySpki),
+    publicKey: PublicKeyParser.parse(publicKeyPem),
     projectId: _projectId,
     backend: _FixedBackend(key, iv),
     clock: _FixedClock(DateTime.utc(2026, 1, 1, 10, 0, 5)),
     newId: () => '7c9e6679-7425-40de-944b-e07fc1f90ae${seed % 10}',
   );
   final envelope = await sealer.seal(records);
+  return _caseJson(name, description, records, key, envelope);
+}
+
+/// A v1 envelope exactly as sealed_trace 1.0.0 sealed it: RSA-2048, no kid,
+/// AES-GCM with no AAD and no padding. The SDK still sends rows that a 1.0.0
+/// install left on the device in this form.
+Future<Map<String, dynamic>> _legacyV1Case(
+  String name,
+  String description,
+  List<LogRecord> records,
+  int seed,
+) async {
+  final key = _bytes(32, seed, 7);
+  final iv = _bytes(12, seed + 1, 13);
+  final padded = Uint8List.fromList(
+    utf8.encode(jsonEncode([for (final r in records) r.toJson()])),
+  );
+  final createdAt = DateTime.utc(2026, 1, 1, 10, 0, 5);
+  final batchId = '7c9e6679-7425-40de-944b-e07fc1f90ae${seed % 10}';
+  final backend = DefaultCryptoBackend();
+  final sealed = backend.aesGcmEncryptSync(
+    key: key,
+    iv: iv,
+    plaintext: padded,
+    aad: Uint8List(0),
+  );
+  final envelope = SealedEnvelope(
+    batchId: batchId,
+    projectId: _projectId,
+    createdAt: createdAt,
+    eventCount: records.length,
+    wrappedKey: backend.rsaOaepWrap(
+      PublicKeyParser.parse(testPublicKeySpki),
+      key,
+    ),
+    iv: iv,
+    tag: sealed.tag,
+    ciphertext: sealed.ciphertext,
+    seqMin: 0,
+    seqMax: 0,
+    minTs: 0,
+    maxTs: 0,
+    topLevels: '',
+    payloadSize: padded.length,
+  );
+  return _caseJson(name, description, records, key, envelope);
+}
+
+Map<String, dynamic> _caseJson(
+  String name,
+  String description,
+  List<LogRecord> records,
+  Uint8List key,
+  SealedEnvelope envelope,
+) {
   return <String, dynamic>{
     'name': name,
     'description': description,
     'aesKeyBase64': _b64(key),
     'plaintextJson': jsonEncode([for (final r in records) r.toJson()]),
+    'paddedLength': envelope.payloadSize,
     'envelope': envelope.toWireJson(),
+    'aadUtf8': utf8.decode(envelope.aad),
     'index': <String, dynamic>{
       'eventCount': envelope.eventCount,
       'seqMin': envelope.seqMin,
@@ -252,6 +311,40 @@ Future<void> main() async {
       ],
       4,
     ),
+    await _envelopeCase(
+      'rsa_3072_key',
+      'I3: a project key of 3072 bits; wrappedKey is 384 bytes and alg names '
+          'the size. Unwrap with testOnlyKeys.privateKey3072Pkcs8.',
+      [
+        _record(
+          seq: 9,
+          level: LogLevel.warning,
+          tag: 'keys',
+          message: 'sealed to a 3072-bit key',
+          at: base,
+        ),
+      ],
+      6,
+      publicKeyPem: testPublicKey3072,
+    ),
+    await _legacyV1Case(
+      'legacy_v1_no_aad',
+      'An envelope left on the device by a sealed_trace 1.0.0 install and '
+          'sent after the app is upgraded: v is 1, no kid, RSA-2048, AES-GCM '
+          'with NO additional authenticated data and no padding '
+          '(paddedLength is the JSON length). Servers must keep accepting it '
+          'during the transition.',
+      [
+        _record(
+          seq: 3,
+          level: LogLevel.info,
+          tag: 'legacy',
+          message: 'sealed before the upgrade',
+          at: base,
+        ),
+      ],
+      7,
+    ),
   ];
 
   // Keys wrapped by the SDK's own RSA-OAEP, for an independent implementation
@@ -287,7 +380,7 @@ Future<void> main() async {
 
   final document = <String, dynamic>{
     'description': <String>[
-      'Golden test vectors for the sealed_trace envelope format (v1).',
+      'Golden test vectors for the sealed_trace envelope format (v3, plus a legacy v1 case).',
       'TEST ONLY: the private key below is published on purpose and protects nothing.',
       'RSA-OAEP is randomized, so wrappedKey differs on every encryption. '
           'Verify envelopes by DECRYPTING them, not by comparing wrappedKey bytes.',
@@ -301,17 +394,43 @@ Future<void> main() async {
       'plaintext':
           'UTF-8 bytes of the compact JSON array of LogEvent objects (no spaces, '
           'keys in the order id, seq, ts, level, tag, message, error, stackTrace, '
-          'metadata, sessionId, userId, ctx; non-ASCII characters are not escaped).',
+          'metadata, sessionId, userId, ctx; non-ASCII characters are not escaped), '
+          'followed by ASCII spaces (0x20) up to the Padme length of its size '
+          '(see "padding"). Trailing whitespace is valid JSON, so parse the '
+          'decrypted bytes as they are or strip the spaces first.',
+      'padding':
+          'paddedLength is 256 if L <= 256; otherwise, with '
+          'E = floor(log2 L), S = floor(log2 E) + 1, '
+          'mask = 2^(E - S) - 1, paddedLength = (L + mask) & ~mask (v3 only; v1 is not padded) '
+          '(Nikitin et al., PETS 2019). L is the JSON length in bytes. Each '
+          'case lists plaintextJson (unpadded) and paddedLength.',
       'aes':
-          'AES-256-GCM, 32-byte random key, 12-byte random IV, no additional '
-          'authenticated data, 16-byte tag stored separately from the ciphertext.',
+          'AES-256-GCM, 32-byte random key, 12-byte random IV, 16-byte tag '
+          'stored separately from the ciphertext. Envelopes authenticate the '
+          'additional data described under "aad"; aesGcmCases use none.',
+      'aad':
+          'UTF-8 bytes of lines joined by a single LF (0x0A), no trailing LF. '
+          'v3: "sealed_trace.envelope.v3", then alg, projectId, batchId, '
+          'createdAt, eventCount and kid, every value exactly as it appears in the '
+          'wire JSON (eventCount in decimal). Rebuild it from the received '
+          'fields; any change to them makes the tag check fail. v1 envelopes '
+          '(sealed_trace 1.0.0, no kid) have no AAD.',
+      'kid':
+          'v3 only. The first 16 bytes of SHA-256 over the DER '
+          'SubjectPublicKeyInfo of the project public key, base64url without '
+          'padding (22 characters). The server picks the private key by kid; '
+          'a v1 envelope has no kid and was sealed to the RSA-2048 key in use '
+          'at the time.',
       'rsa':
-          'RSA-OAEP over the 32-byte AES key: 2048-bit key, SHA-256 label hash, '
-          'MGF1 with SHA-256, empty label. wrappedKey is 256 bytes.',
+          'RSA-OAEP over the 32-byte AES key: SHA-256 label hash, MGF1 with '
+          'SHA-256, empty label. The key is 2048, 3072 or 4096 bits; '
+          'wrappedKey is as long as the modulus (256, 384 or 512 bytes).',
       'base64': 'Standard alphabet with padding (RFC 4648 section 4).',
       'createdAt':
           'UTC ISO-8601 with milliseconds, e.g. 2026-01-01T10:00:05.000Z.',
-      'alg': 'RSA-OAEP-2048-SHA256+AES-256-GCM',
+      'alg':
+          'RSA-OAEP-<bits>-SHA256+AES-256-GCM with <bits> 2048, 3072 or '
+          '4096; always 2048 for v1.',
     },
     'verification': <String, dynamic>{
       'openssl': <String>[
@@ -328,8 +447,11 @@ Future<void> main() async {
       'publicKeySpki': testPublicKeySpki,
       'publicKeyPkcs1': testPublicKeyPkcs1,
       'privateKeyPkcs8': testPrivateKeyPkcs8,
+      'publicKey3072Spki': testPublicKey3072,
+      'privateKey3072Pkcs8': testPrivateKey3072Pkcs8,
     },
     'projectId': _projectId,
+    'envelopeVersion': envelopeVersion,
     'aesGcmCases': aesCases,
     'envelopes': envelopes,
     'rsaOaepWrapCases': wrapCases,

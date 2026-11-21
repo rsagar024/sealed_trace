@@ -153,23 +153,47 @@ class SealedTraceInterceptor extends Interceptor {
       'responseHeaders': job.response == null
           ? null
           : _headers(engine, job.response!.headers.map),
-      'requestBody': config.captureRequestBody
-          ? sanitizer.sanitizeRequest(options)
-          : null,
-      'responseBody': config.captureResponseBody && job.response != null
-          ? sanitizer.sanitizeResponse(job.response!)
-          : null,
+      'requestBody': null,
+      'responseBody': null,
       'error': job.error == null ? null : _describe(engine, job.error!),
     };
+    final request = config.captureRequestBody
+        ? sanitizer.sanitizeRequestOffloaded(options)
+        : null;
+    final response = config.captureResponseBody && job.response != null
+        ? sanitizer.sanitizeResponseOffloaded(job.response!)
+        : null;
 
-    SealedTrace.log(
-      LogEvent(
-        level: level,
-        tag: 'network',
-        message: message,
-        metadata: metadata,
-      ),
-    );
+    void emit(String? requestBody, String? responseBody) {
+      // A large body was sanitized in an isolate: drop the event if the SDK
+      // was disposed or re-initialized meanwhile.
+      if (!identical(SealedTrace.internalRuntime, runtime)) return;
+      metadata['requestBody'] = requestBody;
+      metadata['responseBody'] = responseBody;
+      SealedTrace.log(
+        LogEvent(
+          level: level,
+          tag: 'network',
+          message: message,
+          metadata: metadata,
+        ),
+      );
+    }
+
+    if (request is Future<String?> || response is Future<String?>) {
+      unawaited(
+        Future.wait<String?>([
+          Future<String?>.value(request),
+          Future<String?>.value(response),
+        ]).then(
+          (bodies) => emit(bodies[0], bodies[1]),
+          onError: (Object error, StackTrace stack) =>
+              SealedTrace.reportInternal(error, stack),
+        ),
+      );
+    } else {
+      emit(request, response);
+    }
   }
 
   /// Headers as `name: value` strings with list values joined, through the
