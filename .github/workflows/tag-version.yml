@@ -1,9 +1,18 @@
-# Tags master with the package version.
+# Tags master with the package version and publishes a GitHub Release.
 #
 # On every push to master (a merged pull request included), reads `version:`
-# from pubspec.yaml and creates the tag `v<version>` (for example `v1.0.0`) on
-# that commit. If the tag already exists, because the version was not bumped,
-# nothing happens. This workflow only tags; it never publishes the package.
+# from pubspec.yaml and, if the tag `v<version>` (for example `v1.0.0`) does
+# not exist yet:
+#   1. builds release notes with tool/release/release_notes.sh: the version's
+#      CHANGELOG.md section, every commit since the previous tag, and a
+#      compare link;
+#   2. creates the annotated tag `v<version>` on that commit with those notes
+#      as its message;
+#   3. creates the GitHub Release for the tag with the same notes (marked as a
+#      pre-release for versions such as 2.0.0-beta.1).
+# If the tag already exists, because the version was not bumped, nothing is
+# tagged (a missing Release for it is still created). This workflow never
+# publishes the package to pub.dev.
 name: Tag version
 
 on:
@@ -21,6 +30,8 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -35,19 +46,126 @@ jobs:
             echo "::error file=pubspec.yaml::version '$raw' is not a semantic version"
             exit 1
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "Package version: $version"
 
-      - name: Create tag if missing
+      - name: Create tag with release notes
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
             echo "Tag $TAG already exists; bump version in pubspec.yaml to tag a new release."
+            git fetch --quiet origin "refs/tags/$TAG:refs/tags/$TAG"
+            git for-each-ref --format='%(contents)' "refs/tags/$TAG" > "$RUNNER_TEMP/notes.md"
             exit 0
           fi
+
+          prev_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA" 2>/dev/null || true)"
+          echo "Previous tag: ${prev_tag:-none}"
+          bash tool/release/release_notes.sh "$VERSION" "$prev_tag" "$GITHUB_SHA" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Release $TAG" "$GITHUB_SHA"
+          # verbatim: keep the Markdown "#" headings, which the default cleanup strips.
+          git tag -a "$TAG" --cleanup=verbatim -F "$RUNNER_TEMP/notes.md" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG"
           echo "Created tag $TAG on $GITHUB_SHA"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$TAG" --verify-tag --title "sealed_trace $TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
+          echo "Created release $TAG"
+
+  # Updates the code on the Oracle VPS to the commit that reached master.
+  #
+  # Needs these repository settings (Settings → Secrets and variables → Actions):
+  #   secrets   VPS_HOST         the VPS address, for example 129.225.115.123
+  #             VPS_SSH_KEY      a private key whose public key is in the VPS
+  #                              user's ~/.ssh/authorized_keys
+  #             VPS_USER         optional; defaults to ubuntu
+  #             VPS_KNOWN_HOSTS  optional; the VPS's line(s) from known_hosts. Without
+  #                              it the host key is fetched with ssh-keyscan.
+  #   variables VPS_DEPLOY_PATH  optional; where the code lives, default
+  #                              /opt/sealed_trace
+  #             VPS_POST_DEPLOY  optional; a command run in that directory after
+  #                              the update, for example a build or a restart
+  # Without VPS_HOST and VPS_SSH_KEY the job is skipped with a notice.
+  deploy:
+    needs: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: deploy-vps
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to the Oracle VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ vars.VPS_DEPLOY_PATH }}
+          POST_DEPLOY: ${{ vars.VPS_POST_DEPLOY }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          REPO: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          if [[ -z "$VPS_HOST" || -z "$VPS_SSH_KEY" ]]; then
+            echo "::notice::VPS_HOST or VPS_SSH_KEY is not set; skipping the VPS deploy."
+            exit 0
+          fi
+          user="${VPS_USER:-ubuntu}"
+          path="${DEPLOY_PATH:-/opt/sealed_trace}"
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [[ -n "$VPS_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 15 "$VPS_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+
+          # Runs on the VPS: clone the repo if it is not there, then move it to
+          # this exact commit, then run the optional post-deploy command.
+          remote_script='
+            set -euo pipefail
+            repo="$1"; path="$2"; sha="$3"; tag="$4"; post="$5"
+            if [[ ! -d "$path/.git" ]]; then
+              echo "Code is not on the VPS yet: cloning into $path"
+              sudo mkdir -p "$path"
+              sudo chown "$(id -u):$(id -g)" "$path"
+              git clone --quiet "$repo" "$path"
+            else
+              echo "Code found in $path: updating"
+            fi
+            cd "$path"
+            git fetch --quiet --tags --force origin
+            git checkout --quiet --force "$sha"
+            echo "Now at $(git rev-parse --short HEAD) ($tag)"
+            if [[ -n "$post" ]]; then
+              echo "Running post-deploy command"
+              bash -lc "$post"
+            fi
+          '
+          args="$(printf '%q ' "$REPO" "$path" "$GITHUB_SHA" "$TAG" "$POST_DEPLOY")"
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$user@$VPS_HOST" "bash -c $(printf '%q' "$remote_script") deploy $args"
+          echo "Deployed $GITHUB_SHA ($TAG) to $VPS_HOST:$path"

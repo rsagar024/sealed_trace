@@ -866,7 +866,17 @@ node tool/generate_vectors/verify_vectors.js   # independent check with Node's c
   ```
 - **Before a release:** run the commands above, `dart pub publish --dry-run`, and pana on Linux (pana 0.23.19 can't run
   on Windows).
-- **Releases:** the maintainer publishes by hand.
+- **Releases:** when a pull request merges into `master`, the `Tag version` workflow
+  ([`.github/workflows/tag-version.yml`](https://github.com/rsagar024/sealed_trace/blob/master/.github/workflows/tag-version.yml)):
+  - creates the annotated tag `v<version>` from `pubspec.yaml`, if it does not exist yet, with release notes:
+    the version's CHANGELOG section, every commit since the previous tag, and a compare link;
+  - creates the GitHub Release with the same notes;
+  - updates the code on the Oracle VPS to that commit over SSH: it clones the repository if it is not there yet,
+    then runs `VPS_POST_DEPLOY` if set. It needs the `VPS_HOST` and `VPS_SSH_KEY` secrets and is skipped without
+    them. See the comments in the workflow for every setting.
+
+  Bump `version` in `pubspec.yaml` and add its CHANGELOG section before merging, or no new tag is made. The
+  package itself is published to pub.dev by hand by the maintainer.
 
 <a id="further-reading"></a>
 
