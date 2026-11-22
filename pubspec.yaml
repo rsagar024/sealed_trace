@@ -1,6 +1,6 @@
 name: sealed_trace
 description: "Production-grade logging SDK for Flutter and Dart. Masks PII, seals logs with hybrid encryption, stores them offline and uploads reliably."
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/rsagar024/sealed_trace
 repository: https://github.com/rsagar024/sealed_trace
 issue_tracker: https://github.com/rsagar024/sealed_trace/issues
@@ -47,6 +47,7 @@ dependencies:
   uuid: ^4.6.0
   meta: ^1.19.0
   package_info_plus: ^10.2.2
+  package_info_plus_platform_interface: ^4.1.0
   web: ">=0.5.1 <2.0.0"
   crypto: ^3.0.8
 

@@ -1,4 +1,9 @@
-import 'package:package_info_plus/package_info_plus.dart';
+// The platform interface instead of package_info_plus.dart: that library
+// exports its Linux implementation unconditionally, which pulls dart:io into
+// the web graph and makes the package incompatible with WASM. Registration of
+// the platform implementations still comes from the package_info_plus
+// dependency.
+import 'package:package_info_plus_platform_interface/package_info_platform_interface.dart';
 
 import '../model/device_context.dart';
 import 'device_info.dart';
@@ -12,7 +17,7 @@ Future<DeviceContext> loadDeviceContext() async {
   var version = 'unknown';
   var build = 'unknown';
   try {
-    final package = await PackageInfo.fromPlatform();
+    final package = await PackageInfoPlatform.instance.getAll();
     if (package.version.isNotEmpty) version = package.version;
     if (package.buildNumber.isNotEmpty) build = package.buildNumber;
   } catch (_) {

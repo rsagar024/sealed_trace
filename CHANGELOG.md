@@ -1,3 +1,11 @@
+## 1.0.1
+
+### Fixed
+
+- Web builds are now WASM-compatible. The app version is read through the
+  `package_info_plus` platform interface, so `dart:io` no longer enters the
+  web import graph. This restores full pub.dev platform-support points.
+
 ## 1.0.0
 
 First release.
